@@ -189,3 +189,22 @@ export async function setDmOk(roomId: number, userId: number, dmOk: boolean): Pr
 export async function setGroupMessage(roomId: number, chatId: number, messageId: number): Promise<void> {
   await db.update(rooms).set({ chatId, groupMessageId: messageId }).where(eq(rooms.id, roomId));
 }
+
+export async function setGameMessages(
+  roomId: number,
+  userId: number,
+  cardMessageId: number,
+  signalMessageId: number,
+): Promise<void> {
+  await db
+    .update(roomMembers)
+    .set({ cardMessageId, signalMessageId })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}
+
+export async function clearGameMessages(roomId: number): Promise<void> {
+  await db
+    .update(roomMembers)
+    .set({ cardMessageId: null, signalMessageId: null })
+    .where(eq(roomMembers.roomId, roomId));
+}

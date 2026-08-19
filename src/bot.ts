@@ -7,12 +7,25 @@ import { upsertUser } from './repo/users.js';
 import { startHandler } from './handlers/start.js';
 import { lobbyHandler } from './handlers/lobby.js';
 import { groupHandler } from './handlers/group.js';
+import { gameHandler } from './handlers/game.js';
 
 export const bot = new Bot<BotContext>(config.botToken);
 
 // Очередь под лимиты Telegram + автоповтор на 429/5xx.
 // Без них синхронная рассылка на всю комнату разваливается.
-bot.api.config.use(apiThrottler());
+// Дефолтный per-chat лимит 1 msg/sec задушил бы отсчёт 3-2-1 —
+// поднимаем до 5/сек в один чат, глобальные 30/сек оставляем как есть.
+bot.api.config.use(
+  apiThrottler({
+    out: {
+      maxConcurrent: 1,
+      minTime: 200,
+      reservoir: 5,
+      reservoirRefreshAmount: 5,
+      reservoirRefreshInterval: 1000,
+    },
+  }),
+);
 bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 10 }));
 
 bot.use(async (ctx, next) => {
@@ -23,6 +36,7 @@ bot.use(async (ctx, next) => {
 });
 
 bot.use(groupHandler);
+bot.use(gameHandler);
 bot.use(lobbyHandler);
 bot.use(startHandler);
 

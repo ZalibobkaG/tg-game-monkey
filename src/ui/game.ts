@@ -28,6 +28,14 @@ export function renderCardOpen(actions: string[], isMonkey: boolean): string {
   return ['🎴 <b>Твоя карточка</b>', '', ...lines, ...footer, '', `⏳ спрячется через ${RULES.cardRevealSeconds} сек`].join('\n');
 }
 
+/** Карточка после игры: раскрыта навсегда, без кнопки и таймера. */
+export function renderCardFinal(actions: string[], isMonkey: boolean): string {
+  const lines = isMonkey
+    ? actions.map((_, i) => `${i + 1}. 🐒 ты обезьянка`)
+    : actions.map((a, i) => `${i + 1}. ${esc(a)}`);
+  return ['🎴 <b>Твоя карточка была такой</b>', '', ...lines].join('\n');
+}
+
 export function renderWaiting(round: number, total: number, isAdmin: boolean): string {
   return [
     `🎬 <b>Раунд ${round} из ${total}</b>`,

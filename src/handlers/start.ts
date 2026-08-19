@@ -99,6 +99,10 @@ startHandler.command('leave', async (ctx) => {
     await ctx.reply('Ты сейчас не в комнате.', { reply_markup: menuKeyboard() });
     return;
   }
+  if (room.state === 'playing') {
+    await ctx.reply('🎬 Идёт игра — дождись конца или попроси админа завершить её.');
+    return;
+  }
   await R.leaveRoom(ctx.user.id);
   await ctx.reply('🚪 Вышел из комнаты.', { reply_markup: menuKeyboard() });
   await refreshLobby(ctx.api, room.id);

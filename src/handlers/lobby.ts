@@ -8,6 +8,7 @@ import { renderDeckPicker } from '../ui/lobby.js';
 import { roomQr } from '../services/qr.js';
 import { displayName } from '../repo/users.js';
 import { InputFile } from 'grammy';
+import { startGame } from '../services/game.js';
 
 export const lobbyHandler = new Composer<BotContext>();
 
@@ -92,6 +93,10 @@ lobbyHandler.callbackQuery('lb:back', async (ctx) => {
 lobbyHandler.callbackQuery('lb:leave', async (ctx) => {
   const room = await currentRoom(ctx);
   if (!room) return;
+  if (room.state === 'playing') {
+    await ctx.answerCallbackQuery({ text: 'Идёт игра — выйти нельзя.', show_alert: true });
+    return;
+  }
   await R.leaveRoom(ctx.user.id);
   await ctx.answerCallbackQuery({ text: 'Вышел из комнаты.' });
   await ctx.editMessageText('🚪 Ты вышел из комнаты. /start — вернуться в меню.').catch(() => {});
@@ -110,6 +115,10 @@ lobbyHandler.callbackQuery('lb:close', async (ctx) => {
 lobbyHandler.callbackQuery('lb:start', async (ctx) => {
   const room = await adminRoom(ctx);
   if (!room) return;
+  if (room.state === 'playing') {
+    await ctx.answerCallbackQuery({ text: 'Игра уже идёт.', show_alert: true });
+    return;
+  }
 
   const members = await R.listMembers(room.id);
   const check = canStart(members.length);
@@ -146,8 +155,6 @@ lobbyHandler.callbackQuery('lb:start', async (ctx) => {
     return;
   }
 
-  await ctx.answerCallbackQuery({
-    text: '✅ Всё готово к старту.\n\nРаздача карточек и раунды — следующий этап разработки.',
-    show_alert: true,
-  });
+  await ctx.answerCallbackQuery({ text: '🎴 Раздаю карточки…' });
+  await startGame(ctx.api, room, members, actions);
 });

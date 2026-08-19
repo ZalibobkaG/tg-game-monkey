@@ -3,9 +3,11 @@ import { webhookCallback } from 'grammy';
 import { config } from './config.js';
 import { COMMANDS, bot } from './bot.js';
 import { sql } from './db/index.js';
+import { recoverGames } from './services/game.js';
 
 async function main(): Promise<void> {
   await bot.api.setMyCommands(COMMANDS);
+  await recoverGames(bot.api).catch((e) => console.error('восстановление игр:', e));
 
   if (config.mode === 'webhook') {
     if (!config.webhookUrl) throw new Error('BOT_MODE=webhook, но не задан WEBHOOK_URL');
