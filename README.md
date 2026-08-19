@@ -1,0 +1,122 @@
+# 🐒 Обезьянка
+
+Telegram-бот для офлайн-пати-игры. Компания сидит вместе, у каждого телефон.
+Всем приходит одинаковая карточка из 10 действий, одному — «ты обезьянка».
+По сигналу все резко делают действие №N, обезьянка подстраивается. В конце — голосование.
+
+Полные правила, архитектура и план — в [PLAN.md](PLAN.md).
+
+## Статус
+
+| Этап | Состояние |
+|---|---|
+| 1. Каркас: комнаты, лобби, QR, вход по коду и из группы | ✅ готово |
+| 2. Раздача карточек, раунды, синхронный сигнал | ⏳ следующий |
+| 3. Голосование, переголосование, очки | — |
+| 4. Магазин колод, оплата | — |
+| 5. Прод: webhook, логи, мониторинг | — |
+
+## Стек
+
+Node 22 · TypeScript · [grammY](https://grammy.dev) · PostgreSQL · drizzle-orm
+
+## Локальный запуск
+
+Docker локально нет, поэтому Postgres ставится через Homebrew:
+
+```bash
+brew install postgresql@17
+brew services start postgresql@17
+```
+
+Создать базу и пользователя:
+
+```bash
+psql postgres -c "CREATE USER obezyanka WITH PASSWORD 'obezyanka' SUPERUSER;"
+psql postgres -c "CREATE DATABASE obezyanka OWNER obezyanka;"
+```
+
+Бот в [@BotFather](https://t.me/BotFather): `/newbot` → получить токен.
+Юзернейм бота обязательно продублировать в `BOT_USERNAME` — на нём держатся deep-link и QR.
+
+```bash
+cp .env.example .env
+```
+
+Дальше:
+
+```bash
+npm install
+npm run db:migrate
+npm run db:seed
+npm run dev
+```
+
+## Команды
+
+| Команда | Что делает |
+|---|---|
+| `npm run dev` | бот с автоперезапуском (long polling) |
+| `npm run typecheck` | проверка типов |
+| `npm run build` / `npm start` | сборка и запуск прода |
+| `npm run db:generate` | сгенерировать миграцию из `src/db/schema.ts` |
+| `npm run db:migrate` | применить миграции |
+| `npm run db:seed` | залить колоды из `src/content/decks/*.json` |
+| `npm run db:studio` | веб-просмотр базы |
+
+## Как играть (что уже работает)
+
+**В личке:** `/start` → «Создать комнату» → бот присылает QR и код.
+Остальные сканируют QR с экрана админа или вводят код — и попадают в общее лобби,
+которое обновляется у всех сразу.
+
+**В групповом чате:** добавить бота в чат → `/game` → кто ведущий, жмёт кнопку.
+Комната создаётся у него в личке, а в чат прилетает код и кнопка входа.
+Карточки в любом случае уходят в личку.
+
+Админ выбирает колоду и число раундов (3 / 5 / 7), жмёт «Начать игру».
+
+## Колоды
+
+Лежат в `src/content/decks/*.json`, заливаются через `npm run db:seed` (идемпотентно — можно гонять сколько угодно).
+
+| Колода | Доступ |
+|---|---|
+| Базовая | бесплатно |
+| Для незнакомых компаний | 100 ₽ |
+| Хардкор | 100 ₽ |
+| 18+ | 100 ₽ |
+
+Права на платные колоды лежат в `user_decks`. Магазина пока нет — выдать вручную можно так:
+
+```sql
+INSERT INTO user_decks (user_id, deck_id) VALUES (1, 2) ON CONFLICT DO NOTHING;
+```
+
+## Деплой на VPS
+
+```bash
+cp .env.example .env   # заполнить BOT_TOKEN, BOT_USERNAME, POSTGRES_PASSWORD
+docker compose up -d --build
+docker compose exec bot node dist/db/migrate.js
+docker compose exec bot node dist/db/seed.js
+```
+
+Для webhook в `.env`: `BOT_MODE=webhook`, `WEBHOOK_URL=https://домен/tg`, `WEBHOOK_SECRET=…`
+и nginx с TLS, проксирующий `/tg` на `127.0.0.1:3000`.
+
+## Структура
+
+```
+src/
+├─ config.ts          переменные окружения, deep-link
+├─ bot.ts             сборка бота, throttler, autoRetry, обработка ошибок
+├─ index.ts           точка входа: polling или webhook
+├─ domain/rules.ts    все числа игры в одном месте
+├─ db/                схема, миграции, сид
+├─ repo/              доступ к данным: users, decks, rooms
+├─ services/          lobby (рассылка и правки), qr
+├─ handlers/          start, lobby, group
+├─ ui/                отрисовка сообщений и клавиатур
+└─ content/decks/     колоды
+```
