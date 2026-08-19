@@ -2,7 +2,7 @@ import { Composer } from 'grammy';
 import type { BotContext } from '../types.js';
 import * as R from '../repo/rooms.js';
 import { deckActions, decksFor, getDeck, ownsDeck } from '../repo/decks.js';
-import { RULES, canStart } from '../domain/rules.js';
+import { RULES, canStart, voteEveryLabel } from '../domain/rules.js';
 import { closeLobby, openLobbyFor, refreshLobby } from '../services/lobby.js';
 import { renderDeckPicker } from '../ui/lobby.js';
 import { roomQr } from '../services/qr.js';
@@ -43,14 +43,14 @@ lobbyHandler.callbackQuery('lb:qr', async (ctx) => {
   await openLobbyFor(ctx.api, room.id, ctx.user.id);
 });
 
-lobbyHandler.callbackQuery('lb:rounds', async (ctx) => {
+lobbyHandler.callbackQuery('lb:vote', async (ctx) => {
   const room = await adminRoom(ctx);
   if (!room) return;
-  const options = RULES.roundsOptions;
-  const idx = options.indexOf(room.roundsCount as (typeof options)[number]);
+  const options = RULES.voteEveryOptions;
+  const idx = options.indexOf(room.voteEvery as (typeof options)[number]);
   const next = options[(idx + 1) % options.length]!;
-  await R.setRounds(room.id, next);
-  await ctx.answerCallbackQuery({ text: `Раундов: ${next}` });
+  await R.setVoteEvery(room.id, next);
+  await ctx.answerCallbackQuery({ text: `Голосование ${voteEveryLabel(next)}` });
   await refreshLobby(ctx.api, room.id);
 });
 

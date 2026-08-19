@@ -4,22 +4,23 @@ export const RULES = {
   maxPlayers: 15,
   /** начиная с этого числа игроков — две обезьянки */
   twoMonkeysFrom: 12,
-  /** сколько действий в карточке */
+  /** сколько действий в карточке; оно же потолок раундов — номера не повторяются */
   cardSize: 10,
-  roundsOptions: [3, 5, 7] as const,
-  defaultRounds: 5,
-  /** сколько секунд карточка остаётся открытой после нажатия «Показать» */
-  cardRevealSeconds: 5,
+  /** как часто запускать голосование: каждый раунд / каждые два / каждые три */
+  voteEveryOptions: [1, 2, 3] as const,
+  defaultVoteEvery: 1,
   countdownSeconds: 3,
   points: {
-    /** обезьянке, если её не нашли */
+    /** каждой обезьянке, если её так и не нашли */
     monkeySurvived: 3,
-    /** каждому, кто верно указал обезьянку */
+    /** тому, кто верно указал обезьянку */
     correctVote: 1,
-    /** обезьянке за каждый ошибочный голос */
+    /** обезьянке за каждый голос, ушедший мимо */
     monkeyPerWrongVote: 1,
   },
 } as const;
+
+export const maxRounds = RULES.cardSize;
 
 export function monkeyCount(players: number): number {
   return players >= RULES.twoMonkeysFrom ? 2 : 1;
@@ -33,4 +34,9 @@ export function canStart(players: number): { ok: true } | { ok: false; reason: s
     return { ok: false, reason: `Максимум ${RULES.maxPlayers} игроков, сейчас ${players}` };
   }
   return { ok: true };
+}
+
+export function voteEveryLabel(n: number): string {
+  if (n <= 1) return 'после каждого раунда';
+  return n === 2 ? 'каждые 2 раунда' : `каждые ${n} раунда`;
 }

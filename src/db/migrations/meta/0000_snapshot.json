@@ -1,5 +1,5 @@
 {
-  "id": "3f16c28d-b8b9-485a-9cc9-40a131606437",
+  "id": "62532086-746c-4329-8759-ec71c9aaf2a8",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -182,11 +182,31 @@
           "notNull": true,
           "default": "'dealing'"
         },
-        "rounds_count": {
-          "name": "rounds_count",
+        "vote_every": {
+          "name": "vote_every",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "ballot": {
+          "name": "ballot",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "action_order": {
+          "name": "action_order",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "current_round": {
+          "name": "current_round",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "started_at": {
           "name": "started_at",
@@ -415,6 +435,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "card_message_id": {
+          "name": "card_message_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signal_message_id": {
+          "name": "signal_message_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "joined_at": {
           "name": "joined_at",
           "type": "timestamp with time zone",
@@ -530,12 +562,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "rounds_count": {
-          "name": "rounds_count",
+        "vote_every": {
+          "name": "vote_every",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 5
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

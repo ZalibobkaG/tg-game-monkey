@@ -1,44 +1,32 @@
 import { InlineKeyboard } from 'grammy';
-import { RULES } from '../domain/rules.js';
-import { esc } from './lobby.js';
+import { maxRounds } from '../domain/rules.js';
 
 const DIGITS = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
 
-export const showCardKeyboard = () => new InlineKeyboard().text('👀 Показать карточку', 'g:show');
-
-export function renderCardHidden(code: string): string {
-  return [
-    `🎴 <b>Твоя карточка</b> · комната <code>${code}</code>`,
-    '',
-    'Открой и запомни — во время раунда будет некогда.',
-    `Через ${RULES.cardRevealSeconds} секунд спрячется обратно, чтобы сосед не подсмотрел.`,
-  ].join('\n');
+export function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** У мирных и у обезьянки одинаковая шапка и одинаковое число строк — чтобы взгляд со стороны ничего не выдал. */
-export function renderCardOpen(actions: string[], isMonkey: boolean): string {
+/** Карточка висит открытой всю партию — ни кнопки, ни таймера. */
+export function renderCard(code: string, actions: string[], isMonkey: boolean): string {
   const lines = isMonkey
     ? actions.map((_, i) => `${i + 1}. 🐒 ты обезьянка`)
     : actions.map((a, i) => `${i + 1}. ${esc(a)}`);
 
   const footer = isMonkey
     ? ['', '🐒 <b>Списка ты не знаешь.</b>', 'По сигналу смотри на других и повторяй — быстро.']
-    : ['', '<i>Запомни номера. По сигналу придёт только цифра.</i>'];
+    : [];
 
-  return ['🎴 <b>Твоя карточка</b>', '', ...lines, ...footer, '', `⏳ спрячется через ${RULES.cardRevealSeconds} сек`].join('\n');
+  return [`🎴 <b>Твоя карточка</b> · комната <code>${code}</code>`, '', ...lines, ...footer].join('\n');
 }
 
-/** Карточка после игры: раскрыта навсегда, без кнопки и таймера. */
-export function renderCardFinal(actions: string[], isMonkey: boolean): string {
-  const lines = isMonkey
-    ? actions.map((_, i) => `${i + 1}. 🐒 ты обезьянка`)
-    : actions.map((a, i) => `${i + 1}. ${esc(a)}`);
-  return ['🎴 <b>Твоя карточка была такой</b>', '', ...lines].join('\n');
-}
+// ─── раунд ────────────────────────────────────────────────────────────────
 
-export function renderWaiting(round: number, total: number, isAdmin: boolean): string {
+const roundHead = (round: number) => `🎬 <b>Раунд ${round}</b> из ${maxRounds}`;
+
+export function renderWaiting(round: number, isAdmin: boolean): string {
   return [
-    `🎬 <b>Раунд ${round} из ${total}</b>`,
+    roundHead(round),
     '',
     isAdmin ? 'Все готовы? Жми — пойдёт отсчёт.' : 'Ждём админа…',
     '',
@@ -46,58 +34,123 @@ export function renderWaiting(round: number, total: number, isAdmin: boolean): s
   ].join('\n');
 }
 
-export function renderCountdown(round: number, total: number, left: number): string {
-  return [`🎬 <b>Раунд ${round} из ${total}</b>`, '', DIGITS[left] ?? String(left), '', 'Приготовились…'].join('\n');
+export function renderCountdown(round: number, left: number): string {
+  return [roundHead(round), '', DIGITS[left] ?? String(left), '', 'Приготовились…'].join('\n');
 }
 
-export function renderReveal(round: number, total: number, actionNumber: number, isMonkey: boolean): string {
-  if (isMonkey) {
-    return [`🎬 <b>Раунд ${round} из ${total}</b>`, '', '🐒', '', '<b>КОПИРУЙ!</b>'].join('\n');
-  }
-  return [
-    `🎬 <b>Раунд ${round} из ${total}</b>`,
-    '',
-    DIGITS[actionNumber] ?? String(actionNumber),
-    '',
-    '<b>ДЕЛАЙ!</b>',
-  ].join('\n');
+export function renderReveal(round: number, actionNumber: number, isMonkey: boolean): string {
+  if (isMonkey) return [roundHead(round), '', '🐒', '', '<b>КОПИРУЙ!</b>'].join('\n');
+  return [roundHead(round), '', DIGITS[actionNumber] ?? String(actionNumber), '', '<b>ДЕЛАЙ!</b>'].join('\n');
 }
 
-export function goKeyboard(round: number): InlineKeyboard {
-  return new InlineKeyboard()
+export const goKeyboard = (round: number) =>
+  new InlineKeyboard()
     .text(round === 1 ? '▶️ Погнали' : '▶️ Следующий раунд', 'g:go')
     .row()
     .text('⏹ Завершить игру', 'g:end');
-}
 
-export function afterRoundKeyboard(isLast: boolean): InlineKeyboard {
-  return new InlineKeyboard()
-    .text(isLast ? '🏁 Итог' : '▶️ Следующий раунд', isLast ? 'g:finish' : 'g:go')
+export const afterRoundKeyboard = (voteTime: boolean) =>
+  new InlineKeyboard()
+    .text(voteTime ? '🗳 Голосовать' : '▶️ Следующий раунд', voteTime ? 'g:vote' : 'g:go')
     .row()
     .text('⏹ Завершить игру', 'g:end');
+
+// ─── голосование ──────────────────────────────────────────────────────────
+
+export interface Candidate {
+  userId: number;
+  name: string;
 }
 
-export function renderFinal(args: {
-  monkeyNames: string[];
-  actions: string[];
-  playedNumbers: number[];
+export function renderVoting(args: {
+  round: number;
+  revote: boolean;
+  candidates: Candidate[];
+  myVoteName?: string;
+  voted: number;
+  total: number;
+}): { text: string; keyboard?: InlineKeyboard } {
+  const { round, revote, candidates, myVoteName, voted, total } = args;
+
+  const head = revote ? '🗳 <b>Переголосование</b>' : '🗳 <b>Голосование</b>';
+  const sub = revote ? 'Голоса разделились поровну — выбираем между лидерами.' : 'Кто из них обезьянка?';
+
+  if (myVoteName) {
+    return {
+      text: [
+        head,
+        '',
+        `Твой голос: <b>${esc(myVoteName)}</b> ✅`,
+        '',
+        `Ждём остальных — ${voted} из ${total}.`,
+      ].join('\n'),
+    };
+  }
+
+  const keyboard = new InlineKeyboard();
+  for (const c of candidates) keyboard.text(c.name, `v:${c.userId}`).row();
+
+  return {
+    text: [head, '', sub, '', `Проголосовали ${voted} из ${total}. Ждём всех.`, '', `<i>После ${round} раунда</i>`].join('\n'),
+    keyboard,
+  };
+}
+
+export function renderTie(counts: Array<{ name: string; votes: number }>): string {
+  return [
+    '🤝 <b>Снова ничья</b>',
+    '',
+    ...counts.map((c) => `${esc(c.name)} — ${c.votes}`),
+    '',
+    'Никого не поймали. Обезьянка живёт дальше.',
+  ].join('\n');
+}
+
+export function renderVoteResult(args: {
+  counts: Array<{ name: string; votes: number }>;
+  accusedName: string;
+  caught: boolean;
 }): string {
-  const { monkeyNames, actions, playedNumbers } = args;
+  const { counts, accusedName, caught } = args;
+  return [
+    '🗳 <b>Итоги голосования</b>',
+    '',
+    ...counts.map((c) => `${esc(c.name)} — ${c.votes}`),
+    '',
+    caught
+      ? `✅ <b>${esc(accusedName)}</b> — обезьянка! Поймали.`
+      : `❌ <b>${esc(accusedName)}</b> не обезьянка. Она среди вас и играет дальше.`,
+  ].join('\n');
+}
+
+// ─── финал ────────────────────────────────────────────────────────────────
+
+export function renderFinal(args: {
+  peasantsWon: boolean;
+  monkeyNames: string[];
+  scores: Array<{ name: string; points: number }>;
+  rounds: number;
+  ballots: number;
+}): string {
+  const { peasantsWon, monkeyNames, scores, rounds, ballots } = args;
+  const many = monkeyNames.length > 1;
+
   return [
     '🏁 <b>Игра окончена</b>',
     '',
-    monkeyNames.length === 1 ? '🐒 Обезьянкой был:' : '🐒 Обезьянками были:',
-    ...monkeyNames.map((n) => `<b>${esc(n)}</b>`),
+    peasantsWon
+      ? `✅ <b>Мирные победили</b> — ${many ? 'обезьянок' : 'обезьянку'} нашли.`
+      : `🐒 <b>${many ? 'Обезьянки победили' : 'Обезьянка победила'}</b> — продержалась все ${rounds} раундов.`,
     '',
-    '<b>Что разыгрывали:</b>',
-    ...playedNumbers.map((n, i) => `${i + 1} раунд — №${n + 1} ${esc(actions[n] ?? '')}`),
+    `🐒 ${many ? 'Обезьянками были' : 'Обезьянкой была'}: <b>${monkeyNames.map(esc).join(', ')}</b>`,
     '',
-    '<i>Голосование в боте появится в следующем обновлении — пока обсудите вживую.</i>',
+    '<b>📊 Очки</b>',
+    ...scores.map((s, i) => `${i + 1}. ${esc(s.name)} — ${s.points}`),
+    '',
+    `<i>Раундов сыграно: ${rounds} · голосований: ${ballots}</i>`,
   ].join('\n');
 }
 
 export const againKeyboard = () => new InlineKeyboard().text('🔄 Ещё раз', 'g:again');
 
-export function renderAborted(reason: string): string {
-  return ['⏹ <b>Игра прервана</b>', '', reason].join('\n');
-}
+export const renderAborted = (reason: string) => ['⏹ <b>Игра прервана</b>', '', reason].join('\n');

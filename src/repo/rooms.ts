@@ -95,7 +95,7 @@ export async function createRoom(
           adminUserId,
           chatId: chatId ?? null,
           deckId: base?.id ?? null,
-          roundsCount: RULES.defaultRounds,
+          voteEvery: RULES.defaultVoteEvery,
         })
         .onConflictDoNothing({ target: rooms.code })
         .returning();
@@ -164,8 +164,8 @@ export async function setDeck(roomId: number, deckId: number): Promise<void> {
   await db.update(rooms).set({ deckId }).where(eq(rooms.id, roomId));
 }
 
-export async function setRounds(roomId: number, roundsCount: number): Promise<void> {
-  await db.update(rooms).set({ roundsCount }).where(eq(rooms.id, roomId));
+export async function setVoteEvery(roomId: number, voteEvery: number): Promise<void> {
+  await db.update(rooms).set({ voteEvery }).where(eq(rooms.id, roomId));
 }
 
 export async function setState(roomId: number, state: Room['state']): Promise<void> {

@@ -56,7 +56,8 @@ export const rooms = pgTable('rooms', {
   groupMessageId: integer(),
   state: roomState().notNull().default('lobby'),
   deckId: integer().references(() => decks.id),
-  roundsCount: integer().notNull().default(5),
+  /** через сколько раундов запускать голосование */
+  voteEvery: integer().notNull().default(1),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp({ withTimezone: true }),
 }, (t) => [uniqueIndex('rooms_code_uq').on(t.code)]);
@@ -88,7 +89,9 @@ export const games = pgTable('games', {
   actions: jsonb().$type<string[]>().notNull(),
   monkeyUserIds: jsonb().$type<number[]>().notNull(),
   state: gameState().notNull().default('dealing'),
-  roundsCount: integer().notNull(),
+  voteEvery: integer().notNull(),
+  /** номер текущего голосования; растёт и при переголосовании */
+  ballot: integer().notNull().default(0),
   /** какие действия и в каком порядке разыгрываем — индексы в actions */
   actionOrder: jsonb().$type<number[]>().notNull(),
   /** 0 — ещё не начали, дальше 1..roundsCount */

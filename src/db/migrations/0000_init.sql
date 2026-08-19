@@ -24,7 +24,10 @@ CREATE TABLE "games" (
 	"actions" jsonb NOT NULL,
 	"monkey_user_ids" jsonb NOT NULL,
 	"state" "game_state" DEFAULT 'dealing' NOT NULL,
-	"rounds_count" integer NOT NULL,
+	"vote_every" integer NOT NULL,
+	"ballot" integer DEFAULT 0 NOT NULL,
+	"action_order" jsonb NOT NULL,
+	"current_round" integer DEFAULT 0 NOT NULL,
 	"started_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"ended_at" timestamp with time zone
 );
@@ -48,6 +51,8 @@ CREATE TABLE "room_members" (
 	"is_active" boolean DEFAULT true NOT NULL,
 	"dm_ok" boolean DEFAULT true NOT NULL,
 	"lobby_message_id" integer,
+	"card_message_id" integer,
+	"signal_message_id" integer,
 	"joined_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "room_members_room_id_user_id_pk" PRIMARY KEY("room_id","user_id")
 );
@@ -60,7 +65,7 @@ CREATE TABLE "rooms" (
 	"group_message_id" integer,
 	"state" "room_state" DEFAULT 'lobby' NOT NULL,
 	"deck_id" integer,
-	"rounds_count" integer DEFAULT 5 NOT NULL,
+	"vote_every" integer DEFAULT 1 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"closed_at" timestamp with time zone
 );

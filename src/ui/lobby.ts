@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import type { Deck } from '../repo/decks.js';
 import type { Member, Room } from '../repo/rooms.js';
 import { displayName } from '../repo/users.js';
-import { RULES, canStart, monkeyCount } from '../domain/rules.js';
+import { RULES, canStart, monkeyCount, voteEveryLabel } from '../domain/rules.js';
 import { deepLink } from '../config.js';
 
 export function esc(s: string): string {
@@ -51,14 +51,14 @@ export function renderLobby(args: {
     playerList(members, room, viewerUserId),
     '',
     `🎴 Колода: <b>${esc(deck?.title ?? '—')}</b>`,
-    `🔁 Раундов: <b>${room.roundsCount}</b>`,
+    `🗳 Голосование: <b>${voteEveryLabel(room.voteEvery)}</b>`,
     '',
     statusLine(members.length),
   ].join('\n');
 
   const keyboard = new InlineKeyboard();
   if (isAdmin) {
-    keyboard.text('🎴 Колода', 'lb:deck').text(`🔁 ${room.roundsCount} раундов`, 'lb:rounds').row();
+    keyboard.text('🎴 Колода', 'lb:deck').text('🗳 Голосование', 'lb:vote').row();
     keyboard.text('📷 Показать QR', 'lb:qr').row();
     keyboard.text('▶️ Начать игру', 'lb:start').row();
     keyboard.text('🚪 Закрыть комнату', 'lb:close');
@@ -105,7 +105,7 @@ export function renderGroupLobby(args: {
     `👥 Игроки — ${members.length}`,
     playerList(members, room),
     '',
-    `🎴 ${esc(deck?.title ?? '—')} · 🔁 ${room.roundsCount} раундов`,
+    `🎴 ${esc(deck?.title ?? '—')} · 🗳 ${voteEveryLabel(room.voteEvery)}`,
     '',
     statusLine(members.length),
     '',

@@ -1,7 +1,7 @@
 import { Composer } from 'grammy';
 import type { BotContext } from '../types.js';
 import * as R from '../repo/rooms.js';
-import { abortGame, finishGame, getLive, revealCard, runRound, slotOf } from '../services/game.js';
+import { abortGame, castVote, getLive, runRound, slotOf, startVoting } from '../services/game.js';
 import type { LiveGame, Slot } from '../services/game.js';
 import { openLobbyFor } from '../services/lobby.js';
 
@@ -32,13 +32,6 @@ async function adminLive(ctx: BotContext): Promise<LiveGame | null> {
   return found.game;
 }
 
-gameHandler.callbackQuery('g:show', async (ctx) => {
-  const found = await liveFor(ctx);
-  if (!found) return;
-  await ctx.answerCallbackQuery();
-  await revealCard(ctx.api, found.game, found.slot);
-});
-
 gameHandler.callbackQuery('g:go', async (ctx) => {
   const game = await adminLive(ctx);
   if (!game) return;
@@ -50,11 +43,32 @@ gameHandler.callbackQuery('g:go', async (ctx) => {
   await runRound(ctx.api, game.roomId);
 });
 
-gameHandler.callbackQuery('g:finish', async (ctx) => {
+gameHandler.callbackQuery('g:vote', async (ctx) => {
   const game = await adminLive(ctx);
   if (!game) return;
+  if (game.phase === 'voting') {
+    await ctx.answerCallbackQuery({ text: 'Голосование уже идёт.' });
+    return;
+  }
   await ctx.answerCallbackQuery();
-  await finishGame(ctx.api, game.roomId);
+  await startVoting(ctx.api, game.roomId);
+});
+
+gameHandler.callbackQuery(/^v:(\d+)$/, async (ctx) => {
+  const found = await liveFor(ctx);
+  if (!found) return;
+  const { game } = found;
+  if (game.phase !== 'voting') {
+    await ctx.answerCallbackQuery({ text: 'Голосование уже закончилось.' });
+    return;
+  }
+  const targetId = Number(ctx.match![1]);
+  if (targetId === ctx.user.id) {
+    await ctx.answerCallbackQuery({ text: 'За себя голосовать нельзя.', show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: 'Голос принят.' });
+  await castVote(ctx.api, game.roomId, ctx.user.id, targetId);
 });
 
 gameHandler.callbackQuery('g:end', async (ctx) => {
