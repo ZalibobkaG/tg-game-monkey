@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import type pino from 'pino';
 
 function required(name: string): string {
   const v = process.env[name];
@@ -15,6 +16,16 @@ export const config = {
   webhookUrl: process.env.WEBHOOK_URL ?? '',
   webhookSecret: process.env.WEBHOOK_SECRET ?? '',
   port: Number(process.env.PORT ?? 3000),
+  /** бутстрап-владельцы панели: tg_id через запятую. Остальных админов назначают из панели */
+  adminIds: (process.env.ADMIN_IDS ?? '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0),
+  /** служебный чат для обращений: несколько админов видят одно и то же и не дублируют ответы */
+  adminChatId: Number(process.env.ADMIN_CHAT_ID ?? 0) || null,
+  logLevel: (process.env.LOG_LEVEL ?? 'info') as pino.Level,
+  /** пусто — Sentry не поднимается, ошибки остаются только в логе */
+  sentryDsn: process.env.SENTRY_DSN ?? '',
 } as const;
 
 export function deepLink(code: string): string {

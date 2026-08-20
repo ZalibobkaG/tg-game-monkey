@@ -3,8 +3,11 @@ import type { BotContext } from '../types.js';
 import * as R from '../repo/rooms.js';
 import { deckActions, decksFor, getDeck, ownsDeck } from '../repo/decks.js';
 import { RULES, canStart, voteEveryLabel } from '../domain/rules.js';
-import { closeLobby, openLobbyFor, refreshLobby } from '../services/lobby.js';
-import { renderDeckPicker } from '../ui/lobby.js';
+import { closeLobby, openLobbyFor, refreshLobby, refreshLobbySoon } from '../services/lobby.js';
+import { renderCodePrompt, renderDeckPicker } from '../ui/lobby.js';
+import { MAX_CODE_LEN, MIN_CODE_LEN } from '../lib/code.js';
+import * as pending from '../lib/pending.js';
+import { track, trackDeckLockedHit } from '../services/analytics.js';
 import { roomQr } from '../services/qr.js';
 import { displayName } from '../repo/users.js';
 import { InputFile } from 'grammy';
@@ -50,8 +53,30 @@ lobbyHandler.callbackQuery('lb:vote', async (ctx) => {
   const idx = options.indexOf(room.voteEvery as (typeof options)[number]);
   const next = options[(idx + 1) % options.length]!;
   await R.setVoteEvery(room.id, next);
+  await R.touchRoom(room.id);
   await ctx.answerCallbackQuery({ text: `Голосование ${voteEveryLabel(next)}` });
-  await refreshLobby(ctx.api, room.id);
+  refreshLobbySoon(ctx.api, room.id);
+});
+
+lobbyHandler.callbackQuery('lb:code', async (ctx) => {
+  const room = await adminRoom(ctx);
+  if (!room) return;
+  if (room.state === 'playing') {
+    await ctx.answerCallbackQuery({ text: 'Идёт игра — код сейчас не поменять.', show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  pending.expect(ctx.user.tgId, 'custom_code');
+  await ctx.reply(renderCodePrompt(MIN_CODE_LEN, MAX_CODE_LEN), { parse_mode: 'HTML' });
+});
+
+lobbyHandler.callbackQuery('lb:lock', async (ctx) => {
+  const room = await adminRoom(ctx);
+  if (!room) return;
+  const locked = !room.locked;
+  await R.setLocked(room.id, locked);
+  await ctx.answerCallbackQuery({ text: locked ? '🔒 Вход закрыт' : '🔓 Вход открыт' });
+  refreshLobbySoon(ctx.api, room.id);
 });
 
 lobbyHandler.callbackQuery('lb:deck', async (ctx) => {
@@ -73,6 +98,7 @@ lobbyHandler.callbackQuery(/^lb:deck:(\d+)$/, async (ctx) => {
     return;
   }
   if (!(await ownsDeck(ctx.user.id, deck))) {
+    trackDeckLockedHit(ctx.user.id, deck.slug);
     await ctx.answerCallbackQuery({
       text: `🔒 «${deck.title}» — платная колода, ${deck.priceRub} ₽.\nМагазин появится в ближайшем обновлении.`,
       show_alert: true,
@@ -80,6 +106,8 @@ lobbyHandler.callbackQuery(/^lb:deck:(\d+)$/, async (ctx) => {
     return;
   }
   await R.setDeck(room.id, deck.id);
+  await R.touchRoom(room.id);
+  track({ type: 'deck_selected', userId: ctx.user.id, roomId: room.id, payload: { deckSlug: deck.slug } });
   await ctx.answerCallbackQuery({ text: `Колода: ${deck.title}` });
   await ctx.deleteMessage().catch(() => {});
   await refreshLobby(ctx.api, room.id);
@@ -100,7 +128,7 @@ lobbyHandler.callbackQuery('lb:leave', async (ctx) => {
   await R.leaveRoom(ctx.user.id);
   await ctx.answerCallbackQuery({ text: 'Вышел из комнаты.' });
   await ctx.editMessageText('🚪 Ты вышел из комнаты. /start — вернуться в меню.').catch(() => {});
-  await refreshLobby(ctx.api, room.id);
+  refreshLobbySoon(ctx.api, room.id);
 });
 
 lobbyHandler.callbackQuery('lb:close', async (ctx) => {
@@ -108,6 +136,7 @@ lobbyHandler.callbackQuery('lb:close', async (ctx) => {
   if (!room) return;
   const members = await R.listMembers(room.id);
   await R.closeRoom(room.id);
+  track({ type: 'room_closed', userId: ctx.user.id, roomId: room.id, payload: { reason: 'admin' } });
   await ctx.answerCallbackQuery({ text: 'Комната закрыта.' });
   await closeLobby(ctx.api, room, members, 'Админ закрыл комнату. /start — создать новую.');
 });
@@ -156,5 +185,6 @@ lobbyHandler.callbackQuery('lb:start', async (ctx) => {
   }
 
   await ctx.answerCallbackQuery({ text: '🎴 Раздаю карточки…' });
-  await startGame(ctx.api, room, members, actions);
+  const game = await startGame(ctx.api, room, members, actions, deck.slug);
+  if (!game) await ctx.answerCallbackQuery({ text: 'Игра уже идёт.' }).catch(() => {});
 });

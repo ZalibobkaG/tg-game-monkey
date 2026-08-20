@@ -45,7 +45,7 @@ export function renderLobby(args: {
 
   const text = [
     '🐒 <b>Обезьянка</b>',
-    `Комната <code>${room.code}</code>`,
+    `Комната <code>${room.code}</code>${room.locked ? ' 🔒' : ''}`,
     '',
     `👥 Игроки — ${members.length}`,
     playerList(members, room, viewerUserId),
@@ -53,13 +53,14 @@ export function renderLobby(args: {
     `🎴 Колода: <b>${esc(deck?.title ?? '—')}</b>`,
     `🗳 Голосование: <b>${voteEveryLabel(room.voteEvery)}</b>`,
     '',
-    statusLine(members.length),
+    room.locked ? '🔒 Вход закрыт — новые не войдут.' : statusLine(members.length),
   ].join('\n');
 
   const keyboard = new InlineKeyboard();
   if (isAdmin) {
     keyboard.text('🎴 Колода', 'lb:deck').text('🗳 Голосование', 'lb:vote').row();
-    keyboard.text('📷 Показать QR', 'lb:qr').row();
+    keyboard.text('📷 QR', 'lb:qr').text('✏️ Свой код', 'lb:code').row();
+    keyboard.text(room.locked ? '🔓 Открыть вход' : '🔒 Закрыть вход', 'lb:lock').row();
     keyboard.text('▶️ Начать игру', 'lb:start').row();
     keyboard.text('🚪 Закрыть комнату', 'lb:close');
   } else {
@@ -100,20 +101,31 @@ export function renderGroupLobby(args: {
   const { room, members, deck } = args;
   const text = [
     '🐒 <b>Игра «Обезьянка»</b>',
-    `Комната <code>${room.code}</code>`,
+    `Комната <code>${room.code}</code>${room.locked ? ' 🔒' : ''}`,
     '',
     `👥 Игроки — ${members.length}`,
     playerList(members, room),
     '',
     `🎴 ${esc(deck?.title ?? '—')} · 🗳 ${voteEveryLabel(room.voteEvery)}`,
     '',
-    statusLine(members.length),
+    room.locked ? '🔒 Вход закрыт.' : statusLine(members.length),
     '',
     '<i>Жми кнопку — карточка придёт в личку.</i>',
   ].join('\n');
 
   const keyboard = new InlineKeyboard().url('🎮 Войти в игру', deepLink(room.code));
   return { text, keyboard };
+}
+
+export function renderCodePrompt(min: number, max: number): string {
+  return [
+    '✏️ <b>Свой код комнаты</b>',
+    '',
+    `Пришли код: ${min}–${max} латинских букв и цифр.`,
+    'Например <code>LITVIN</code>.',
+    '',
+    '<i>Старый QR и старая ссылка перестанут работать.</i>',
+  ].join('\n');
 }
 
 export function renderClosed(room: Room): string {

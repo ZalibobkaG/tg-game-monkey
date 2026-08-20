@@ -2,6 +2,15 @@ import { Api, GrammyError } from 'grammy';
 import * as R from '../repo/rooms.js';
 import { getDeck } from '../repo/decks.js';
 import { renderGroupLobby, renderLobby } from '../ui/lobby.js';
+import { createDebouncer } from '../lib/debounce.js';
+import { trackBotBlocked } from './analytics.js';
+
+/**
+ * Схлопывание перерисовок лобби. Когда компания из десяти человек сканирует
+ * QR одновременно, немедленная перерисовка стоит сто правок, из которых
+ * полезны последние десять.
+ */
+const lobbyPaint = createDebouncer(400, 1500);
 
 function isNotModified(e: unknown): boolean {
   return e instanceof GrammyError && e.description.includes('message is not modified');
@@ -29,6 +38,7 @@ async function sendLobbyTo(api: Api, room: R.Room, members: R.Member[], member: 
   } catch (e) {
     if (isBlocked(e)) {
       await R.setDmOk(room.id, member.userId, false);
+      trackBotBlocked(member.userId, 'lobby');
       return;
     }
     throw e;
@@ -80,8 +90,13 @@ export async function refreshLobby(api: Api, roomId: number): Promise<void> {
   }
 }
 
-export async function refreshMany(api: Api, roomIds: number[]): Promise<void> {
-  await Promise.all([...new Set(roomIds)].map((id) => refreshLobby(api, id).catch(() => {})));
+/** Отложенная перерисовка — версия по умолчанию для join/leave и смены настроек. */
+export function refreshLobbySoon(api: Api, roomId: number): void {
+  lobbyPaint.schedule(roomId, () => refreshLobby(api, roomId));
+}
+
+export function refreshMany(api: Api, roomIds: number[]): void {
+  for (const id of new Set(roomIds)) refreshLobbySoon(api, id);
 }
 
 /** Первый показ лобби игроку сразу после входа: старое сообщение убираем, новое шлём вниз чата. */
@@ -99,6 +114,7 @@ export async function openLobbyFor(api: Api, roomId: number, userId: number): Pr
 
 /** Закрывает лобби у всех: снимает кнопки и пишет, что комната закрыта. */
 export async function closeLobby(api: Api, room: R.Room, members: R.Member[], reason: string): Promise<void> {
+  lobbyPaint.cancel(room.id);
   await Promise.all(
     members.map(async (m) => {
       if (!m.lobbyMessageId) return;

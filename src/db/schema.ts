@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm';
 import {
-  pgTable, pgEnum, serial, bigint, text, boolean, integer,
+  pgTable, pgEnum, serial, bigserial, bigint, text, boolean, integer,
   timestamp, jsonb, uniqueIndex, index, primaryKey,
 } from 'drizzle-orm/pg-core';
 
@@ -21,7 +22,17 @@ export const users = pgTable('users', {
   username: text(),
   firstName: text().notNull().default(''),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex('users_tg_id_uq').on(t.tgId)]);
+  lastSeenAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /** заблокировал бота — в рассылки не попадает */
+  blockedBot: boolean().notNull().default(false),
+  /** откуда пришёл: direct | deeplink_room | deeplink_group */
+  source: text().notNull().default('direct'),
+  marketingOptOut: boolean().notNull().default(false),
+  bannedUntil: timestamp({ withTimezone: true }),
+}, (t) => [
+  uniqueIndex('users_tg_id_uq').on(t.tgId),
+  index('users_last_seen_idx').on(t.lastSeenAt),
+]);
 
 export const decks = pgTable('decks', {
   id: serial().primaryKey(),
@@ -50,6 +61,10 @@ export const userDecks = pgTable('user_decks', {
 export const rooms = pgTable('rooms', {
   id: serial().primaryKey(),
   code: text().notNull(),
+  /** код задан админом вручную, а не сгенерирован */
+  codeCustom: boolean().notNull().default(false),
+  /** админ запер комнату — новые игроки не входят */
+  locked: boolean().notNull().default(false),
   adminUserId: integer().notNull().references(() => users.id),
   /** id группового чата, если комната анонсирована в группе */
   chatId: bigint({ mode: 'number' }),
@@ -59,8 +74,15 @@ export const rooms = pgTable('rooms', {
   /** через сколько раундов запускать голосование */
   voteEvery: integer().notNull().default(1),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /** последнее действие в комнате — по нему janitor закрывает брошенные */
+  lastActivityAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp({ withTimezone: true }),
-}, (t) => [uniqueIndex('rooms_code_uq').on(t.code)]);
+}, (t) => [
+  // Частичный уникальный индекс: код занят только живой комнатой.
+  // Закрытые остаются в истории и не жгут коды — иначе «LITVIN» выгорел бы после первой игры.
+  uniqueIndex('rooms_code_active_uq').on(t.code).where(sql`state <> 'closed'`),
+  index('rooms_code_idx').on(t.code),
+]);
 
 export const roomMembers = pgTable('room_members', {
   roomId: integer().notNull().references(() => rooms.id, { onDelete: 'cascade' }),
@@ -131,3 +153,84 @@ export const payments = pgTable('payments', {
   status: paymentStatus().notNull().default('pending'),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('payments_provider_external_uq').on(t.provider, t.externalId)]);
+
+// ─── статистика ───────────────────────────────────────────────────────────
+
+/**
+ * Сырой лог событий. Без внешних ключей намеренно: лог должен пережить
+ * удаление комнаты, а вставка — не брать лишних локов. Пишется пачками
+ * из буфера в памяти, чтобы аналитика никогда не стояла на пути отсчёта.
+ */
+export const events = pgTable('events', {
+  id: bigserial({ mode: 'number' }).primaryKey(),
+  type: text().notNull(),
+  userId: integer(),
+  roomId: integer(),
+  gameId: integer(),
+  payload: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('events_type_time_idx').on(t.type, t.createdAt),
+  index('events_user_time_idx').on(t.userId, t.createdAt),
+]);
+
+/** Кто и с какой ролью играл. Без этой таблицы история партий неполная: роли лежали в jsonb, а очки не сохранялись вовсе. */
+export const gamePlayers = pgTable('game_players', {
+  gameId: integer().notNull().references(() => games.id, { onDelete: 'cascade' }),
+  userId: integer().notNull().references(() => users.id, { onDelete: 'cascade' }),
+  seat: integer().notNull(),
+  isMonkey: boolean().notNull(),
+  points: integer().notNull().default(0),
+  /** вышел или заблокировал бота посреди партии */
+  leftEarly: boolean().notNull().default(false),
+}, (t) => [
+  primaryKey({ columns: [t.gameId, t.userId] }),
+  index('game_players_user_idx').on(t.userId),
+]);
+
+/** Агрегаты игрока. Обновляются инкрементально (x = x + excluded.x), не пересчётом. */
+export const userStats = pgTable('user_stats', {
+  userId: integer().primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  gamesPlayed: integer().notNull().default(0),
+  gamesAsMonkey: integer().notNull().default(0),
+  winsAsMonkey: integer().notNull().default(0),
+  winsAsPeasant: integer().notNull().default(0),
+  votesCast: integer().notNull().default(0),
+  correctVotes: integer().notNull().default(0),
+  timesAccused: integer().notNull().default(0),
+  pointsTotal: integer().notNull().default(0),
+  roomsCreated: integer().notNull().default(0),
+  lastGameAt: timestamp({ withTimezone: true }),
+});
+
+// ─── обратная связь и админы ──────────────────────────────────────────────
+
+export const feedbackKind = pgEnum('feedback_kind', ['idea', 'bug', 'deck', 'other']);
+export const feedbackStatus = pgEnum('feedback_status', ['new', 'read', 'answered', 'archived', 'spam']);
+
+export const feedback = pgTable('feedback', {
+  id: serial().primaryKey(),
+  userId: integer().notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** комната, из которой написали — админу сразу виден контекст */
+  roomId: integer(),
+  kind: feedbackKind().notNull().default('other'),
+  text: text().notNull(),
+  status: feedbackStatus().notNull().default('new'),
+  answeredBy: integer().references(() => users.id),
+  reply: text(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  answeredAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  index('feedback_status_idx').on(t.status, t.createdAt),
+  index('feedback_user_idx').on(t.userId),
+]);
+
+export const adminRole = pgEnum('admin_role', ['owner', 'moderator', 'support']);
+
+/** ADMIN_IDS из окружения — бутстрап-владельцы; остальные живут здесь и назначаются из панели. */
+export const admins = pgTable('admins', {
+  userId: integer().primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  role: adminRole().notNull().default('support'),
+  addedBy: integer().references(() => users.id),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});

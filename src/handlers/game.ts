@@ -35,7 +35,7 @@ async function adminLive(ctx: BotContext): Promise<LiveGame | null> {
 gameHandler.callbackQuery('g:go', async (ctx) => {
   const game = await adminLive(ctx);
   if (!game) return;
-  if (game.busy || game.phase === 'countdown') {
+  if (game.phase === 'countdown') {
     await ctx.answerCallbackQuery({ text: 'Отсчёт уже идёт.' });
     return;
   }

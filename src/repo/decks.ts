@@ -1,6 +1,6 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, count, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { deckItems, decks, userDecks } from '../db/schema.js';
+import { deckItems, decks, games, userDecks } from '../db/schema.js';
 
 export type Deck = typeof decks.$inferSelect;
 
@@ -35,6 +35,26 @@ export async function decksFor(userId: number): Promise<Array<Deck & { owned: bo
   const owned = await db.select({ deckId: userDecks.deckId }).from(userDecks).where(eq(userDecks.userId, userId));
   const set = new Set(owned.map((o) => o.deckId));
   return all.map((d) => ({ ...d, owned: !d.isPremium || set.has(d.id) }));
+}
+
+export type DeckSummary = Deck & { items: number; games: number };
+
+/** Сводка для админ-панели: сколько в колоде действий и сколько ей сыграли. */
+export async function deckSummary(): Promise<DeckSummary[]> {
+  const all = await listDecks();
+  const items = await db
+    .select({ deckId: deckItems.deckId, n: count() })
+    .from(deckItems)
+    .groupBy(deckItems.deckId);
+  const played = await db.select({ deckId: games.deckId, n: count() }).from(games).groupBy(games.deckId);
+
+  const itemsBy = new Map(items.map((r) => [r.deckId, Number(r.n)]));
+  const playedBy = new Map(played.map((r) => [r.deckId, Number(r.n)]));
+  return all.map((d) => ({ ...d, items: itemsBy.get(d.id) ?? 0, games: playedBy.get(d.id) ?? 0 }));
+}
+
+export async function revokeDeck(userId: number, deckId: number): Promise<void> {
+  await db.delete(userDecks).where(and(eq(userDecks.userId, userId), eq(userDecks.deckId, deckId)));
 }
 
 export async function grantDeck(userId: number, deckId: number, paymentId?: number): Promise<void> {

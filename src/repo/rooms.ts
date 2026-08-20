@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, max, ne } from 'drizzle-orm';
+import { and, asc, count, desc, eq, lt, max, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { roomMembers, rooms, users } from '../db/schema.js';
 import { generateRoomCode } from '../lib/code.js';
@@ -16,8 +16,21 @@ export async function getRoom(id: number): Promise<Room | undefined> {
   return db.query.rooms.findFirst({ where: eq(rooms.id, id) });
 }
 
-export async function getRoomByCode(code: string): Promise<Room | undefined> {
-  return db.query.rooms.findFirst({ where: eq(rooms.code, code) });
+/**
+ * Живая комната с таким кодом. Больше одной быть не может — гарантирует
+ * частичный уникальный индекс `rooms_code_active_uq` (WHERE state <> 'closed').
+ * Закрытые комнаты код не держат: «LITVIN» можно взять снова хоть завтра.
+ */
+export async function getActiveRoomByCode(code: string): Promise<Room | undefined> {
+  return db.query.rooms.findFirst({
+    where: and(eq(rooms.code, code), ne(rooms.state, 'closed')),
+  });
+}
+
+/** Был ли такой код когда-нибудь — нужно только чтобы отличить «закрыта» от «не существует». */
+export async function codeWasUsed(code: string): Promise<boolean> {
+  const [row] = await db.select({ id: rooms.id }).from(rooms).where(eq(rooms.code, code)).limit(1);
+  return Boolean(row);
 }
 
 /** Активная комната игрока — он может быть только в одной. */
@@ -97,7 +110,7 @@ export async function createRoom(
           deckId: base?.id ?? null,
           voteEvery: RULES.defaultVoteEvery,
         })
-        .onConflictDoNothing({ target: rooms.code })
+        .onConflictDoNothing()
         .returning();
       room = created;
     }
@@ -108,14 +121,15 @@ export async function createRoom(
   });
 }
 
+export type JoinError = 'not_found' | 'closed' | 'in_progress' | 'full' | 'locked';
+
 export type JoinResult =
   | { ok: true; room: Room; alreadyIn: boolean; affectedRooms: number[] }
-  | { ok: false; error: 'not_found' | 'closed' | 'in_progress' | 'full' };
+  | { ok: false; error: JoinError };
 
 export async function joinRoom(code: string, userId: number): Promise<JoinResult> {
-  const room = await getRoomByCode(code);
-  if (!room) return { ok: false, error: 'not_found' };
-  if (room.state === 'closed') return { ok: false, error: 'closed' };
+  const room = await getActiveRoomByCode(code);
+  if (!room) return { ok: false, error: (await codeWasUsed(code)) ? 'closed' : 'not_found' };
 
   const existing = await db.query.roomMembers.findFirst({
     where: and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, userId)),
@@ -123,6 +137,7 @@ export async function joinRoom(code: string, userId: number): Promise<JoinResult
   if (existing?.isActive) return { ok: true, room, alreadyIn: true, affectedRooms: [] };
 
   if (room.state === 'playing') return { ok: false, error: 'in_progress' };
+  if (room.locked) return { ok: false, error: 'locked' };
 
   const members = await listMembers(room.id);
   if (members.length >= RULES.maxPlayers) return { ok: false, error: 'full' };
@@ -158,6 +173,62 @@ export async function leaveRoom(userId: number): Promise<void> {
 export async function closeRoom(roomId: number): Promise<void> {
   await db.update(rooms).set({ state: 'closed', closedAt: new Date() }).where(eq(rooms.id, roomId));
   await db.update(roomMembers).set({ isActive: false, lobbyMessageId: null }).where(eq(roomMembers.roomId, roomId));
+}
+
+/** Postgres: нарушение уникальности. Ловим, чтобы отдать «код занят» вместо 500. */
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: string }).code === '23505';
+}
+
+export type SetCodeResult = { ok: true } | { ok: false; error: 'taken' };
+
+/** Свой код комнаты. Гонку за один и тот же код разруливает индекс, а не мы. */
+export async function setRoomCode(roomId: number, code: string): Promise<SetCodeResult> {
+  try {
+    await db
+      .update(rooms)
+      .set({ code, codeCustom: true, lastActivityAt: new Date() })
+      .where(eq(rooms.id, roomId));
+    return { ok: true };
+  } catch (e) {
+    if (isUniqueViolation(e)) return { ok: false, error: 'taken' };
+    throw e;
+  }
+}
+
+export async function setLocked(roomId: number, locked: boolean): Promise<void> {
+  await db.update(rooms).set({ locked, lastActivityAt: new Date() }).where(eq(rooms.id, roomId));
+}
+
+/** Отметка активности — по ней janitor отличает живую комнату от брошенной. */
+export async function touchRoom(roomId: number): Promise<void> {
+  await db.update(rooms).set({ lastActivityAt: new Date() }).where(eq(rooms.id, roomId));
+}
+
+/** Комнаты в лобби, где давно ничего не происходило. */
+export async function staleLobbies(before: Date): Promise<Room[]> {
+  return db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.state, 'lobby'), lt(rooms.lastActivityAt, before)));
+}
+
+export interface OpenRoom {
+  room: Room;
+  players: number;
+}
+
+/** Живые комнаты для админ-панели: лобби и идущие партии. */
+export async function listOpenRooms(limit = 20): Promise<OpenRoom[]> {
+  const rows = await db
+    .select({ room: rooms, players: count(roomMembers.userId) })
+    .from(rooms)
+    .leftJoin(roomMembers, and(eq(roomMembers.roomId, rooms.id), eq(roomMembers.isActive, true)))
+    .where(ne(rooms.state, 'closed'))
+    .groupBy(rooms.id)
+    .orderBy(desc(rooms.lastActivityAt))
+    .limit(limit);
+  return rows.map((r) => ({ room: r.room, players: Number(r.players) }));
 }
 
 export async function setDeck(roomId: number, deckId: number): Promise<void> {

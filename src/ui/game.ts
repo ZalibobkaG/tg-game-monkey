@@ -38,6 +38,11 @@ export function renderCountdown(round: number, left: number): string {
   return [roundHead(round), '', DIGITS[left] ?? String(left), '', 'Приготовились…'].join('\n');
 }
 
+/** Схлопнутый отсчёт: один кадр вместо трёх цифр, когда партий много. */
+export function renderGetReady(round: number): string {
+  return [roundHead(round), '', '⏳', '', 'Приготовились…'].join('\n');
+}
+
 export function renderReveal(round: number, actionNumber: number, isMonkey: boolean): string {
   if (isMonkey) return [roundHead(round), '', '🐒', '', '<b>КОПИРУЙ!</b>'].join('\n');
   return [roundHead(round), '', DIGITS[actionNumber] ?? String(actionNumber), '', '<b>ДЕЛАЙ!</b>'].join('\n');
@@ -90,8 +95,10 @@ export function renderVoting(args: {
   const keyboard = new InlineKeyboard();
   for (const c of candidates) keyboard.text(c.name, `v:${c.userId}`).row();
 
+  // Ни счётчика, ни прочей меняющейся цифры: сообщение неголосовавшего
+  // рисуется один раз за бюллетень и больше не трогается.
   return {
-    text: [head, '', sub, '', `Проголосовали ${voted} из ${total}. Ждём всех.`, '', `<i>После ${round} раунда</i>`].join('\n'),
+    text: [head, '', sub, '', `<i>После ${round} раунда</i>`].join('\n'),
     keyboard,
   };
 }
@@ -151,6 +158,11 @@ export function renderFinal(args: {
   ].join('\n');
 }
 
-export const againKeyboard = () => new InlineKeyboard().text('🔄 Ещё раз', 'g:again');
+export const againKeyboard = () =>
+  new InlineKeyboard().text('🔄 Ещё раз', 'g:again').row().text('💡 Написать разработчикам', 'fb:new');
+
+/** Тем, кто не админ: сыграть ещё решает админ, а написать нам может каждый. */
+export const finalGuestKeyboard = () =>
+  new InlineKeyboard().text('💡 Написать разработчикам', 'fb:new');
 
 export const renderAborted = (reason: string) => ['⏹ <b>Игра прервана</b>', '', reason].join('\n');
