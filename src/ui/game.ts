@@ -72,35 +72,70 @@ export function renderVoting(args: {
   revote: boolean;
   candidates: Candidate[];
   myVoteName?: string;
+  /** этот игрок воздержался */
+  mySkipped: boolean;
+  /** можно ли воздержаться в этом бюллетене — в последнем раунде нельзя */
+  canSkip: boolean;
   voted: number;
   total: number;
 }): { text: string; keyboard?: InlineKeyboard } {
-  const { round, revote, candidates, myVoteName, voted, total } = args;
+  const { round, revote, candidates, myVoteName, mySkipped, canSkip, voted, total } = args;
 
   const head = revote ? '🗳 <b>Переголосование</b>' : '🗳 <b>Голосование</b>';
   const sub = revote ? 'Голоса разделились поровну — выбираем между лидерами.' : 'Кто из них обезьянка?';
 
-  if (myVoteName) {
+  if (myVoteName || mySkipped) {
     return {
       text: [
         head,
         '',
-        `Твой голос: <b>${esc(myVoteName)}</b> ✅`,
+        mySkipped ? '⏭ Ты пропустил голосование.' : `Твой голос: <b>${esc(myVoteName!)}</b> ✅`,
         '',
         `Ждём остальных — ${voted} из ${total}.`,
       ].join('\n'),
     };
   }
 
+  // `row()` всегда открывает новую строку, поэтому зовём его между кнопками,
+  // а не после каждой: иначе в клавиатуре остаётся пустой хвост.
   const keyboard = new InlineKeyboard();
-  for (const c of candidates) keyboard.text(c.name, `v:${c.userId}`).row();
+  candidates.forEach((c, i) => {
+    if (i > 0) keyboard.row();
+    keyboard.text(c.name, `v:${c.userId}`);
+  });
+  if (canSkip) {
+    if (candidates.length) keyboard.row();
+    keyboard.text('⏭ Пропустить', 'v:skip');
+  }
 
-  // Ни счётчика, ни прочей меняющейся цифры: сообщение неголосовавшего
-  // рисуется один раз за бюллетень и больше не трогается.
+  // Ни счётчика, ни прочей меняющейся цифры: сообщение неответившего
+  // рисуется один раз за бюллетень и больше не трогается. `canSkip` внутри
+  // бюллетеня не меняется, так что отпечаток остаётся стабильным.
   return {
-    text: [head, '', sub, '', `<i>После ${round} раунда</i>`].join('\n'),
+    text: [
+      head,
+      '',
+      sub,
+      ...(canSkip ? [] : ['<i>Последний раунд — пропустить нельзя.</i>']),
+      '',
+      `<i>После ${round} раунда</i>`,
+    ].join('\n'),
     keyboard,
   };
+}
+
+/**
+ * Бюллетень не состоялся. Раскладку голосов и обвинённого намеренно не
+ * показываем: голосования как бы и не было, а раскрытая роль осталась бы
+ * раскрытой навсегда.
+ */
+export function renderNoQuorum(votesCast: number, total: number): string {
+  return [
+    '🗳 <b>Голосование не состоялось</b>',
+    '',
+    `Проголосовали ${votesCast} из ${total} — большинство пропустило.`,
+    'Ничего не раскрываем, играем дальше.',
+  ].join('\n');
 }
 
 export function renderTie(counts: Array<{ name: string; votes: number }>): string {
@@ -135,11 +170,10 @@ export function renderVoteResult(args: {
 export function renderFinal(args: {
   peasantsWon: boolean;
   monkeyNames: string[];
-  scores: Array<{ name: string; points: number }>;
   rounds: number;
   ballots: number;
 }): string {
-  const { peasantsWon, monkeyNames, scores, rounds, ballots } = args;
+  const { peasantsWon, monkeyNames, rounds, ballots } = args;
   const many = monkeyNames.length > 1;
 
   return [
@@ -150,9 +184,6 @@ export function renderFinal(args: {
       : `🐒 <b>${many ? 'Обезьянки победили' : 'Обезьянка победила'}</b> — продержалась все ${rounds} раундов.`,
     '',
     `🐒 ${many ? 'Обезьянками были' : 'Обезьянкой была'}: <b>${monkeyNames.map(esc).join(', ')}</b>`,
-    '',
-    '<b>📊 Очки</b>',
-    ...scores.map((s, i) => `${i + 1}. ${esc(s.name)} — ${s.points}`),
     '',
     `<i>Раундов сыграно: ${rounds} · голосований: ${ballots}</i>`,
   ].join('\n');

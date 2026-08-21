@@ -32,17 +32,6 @@ export async function listAdmins(): Promise<AdminRow[]> {
   return rows.map((r) => ({ ...r.a, user: r.u }));
 }
 
-export async function setAdmin(userId: number, role: AdminRole, addedBy: number): Promise<void> {
-  await db
-    .insert(admins)
-    .values({ userId, role, addedBy })
-    .onConflictDoUpdate({ target: admins.userId, set: { role } });
-}
-
-export async function removeAdmin(userId: number): Promise<void> {
-  await db.delete(admins).where(eq(admins.userId, userId));
-}
-
 export interface NotifyPlan {
   /** служебный чат, если задан: несколько админов видят одно и то же и не дублируют ответы */
   chat: number | null;

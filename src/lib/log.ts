@@ -39,4 +39,18 @@ export const log = pino({
 export const roomLog = (roomId: number, code?: string): pino.Logger =>
   log.child(code ? { roomId, code } : { roomId });
 
-export const gameLog = (gameId: number, roomId: number): pino.Logger => log.child({ gameId, roomId });
+/**
+ * Логгер платежей. Отдельная ветка с меткой `mod: "pay"`, чтобы весь путь
+ * денег выдёргивался из потока одним грепом:
+ *
+ *     npm run dev | grep '"mod":"pay"'
+ *     journalctl -u obezyanka | grep '"mod":"pay"'
+ *
+ * Уровень задаётся отдельно от общего: `PAYMENTS_LOG_LEVEL=debug` включает
+ * подробности (тела запросов к кассам, содержимое вебхуков), не заливая
+ * дебагом весь остальной бот. Ключи и токены сюда не попадают никогда.
+ */
+export const payLog = log.child(
+  { mod: 'pay' },
+  { level: process.env['PAYMENTS_LOG_LEVEL'] ?? config.logLevel },
+);

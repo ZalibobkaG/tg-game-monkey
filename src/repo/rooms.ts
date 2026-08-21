@@ -19,7 +19,7 @@ export async function getRoom(id: number): Promise<Room | undefined> {
 /**
  * Живая комната с таким кодом. Больше одной быть не может — гарантирует
  * частичный уникальный индекс `rooms_code_active_uq` (WHERE state <> 'closed').
- * Закрытые комнаты код не держат: «LITVIN» можно взять снова хоть завтра.
+ * Закрытые комнаты код не держат: «MONKEY» можно взять снова хоть завтра.
  */
 export async function getActiveRoomByCode(code: string): Promise<Room | undefined> {
   return db.query.rooms.findFirst({

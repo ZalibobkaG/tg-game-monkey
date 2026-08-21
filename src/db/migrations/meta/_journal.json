@@ -22,6 +22,20 @@
       "when": 1787198181448,
       "tag": "0002_strong_metal_master",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787291761517,
+      "tag": "0003_luxuriant_cable",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787298657260,
+      "tag": "0004_silent_stark_industries",
+      "breakpoints": true
     }
   ]
 }

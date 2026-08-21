@@ -121,13 +121,10 @@ export function renderCodePrompt(min: number, max: number): string {
   return [
     '✏️ <b>Свой код комнаты</b>',
     '',
-    `Пришли код: ${min}–${max} латинских букв и цифр.`,
-    'Например <code>LITVIN</code>.',
+    `Пришли любое слово — латинские буквы и цифры, от ${min} до ${max} символов.`,
+    'Например <code>MONKEY</code> или <code>VECHERINKA</code>.',
+    'Дефис, подчёркивание и пробел вырежу сам.',
     '',
     '<i>Старый QR и старая ссылка перестанут работать.</i>',
   ].join('\n');
-}
-
-export function renderClosed(room: Room): string {
-  return `🐒 Комната <code>${room.code}</code> закрыта.`;
 }

@@ -11,6 +11,9 @@ interface DeckFile {
   description: string;
   isPremium: boolean;
   priceRub: number;
+  priceStars: number;
+  priceCoins: number;
+  active?: boolean;
   sort: number;
   items: string[];
 }
@@ -29,15 +32,19 @@ for (const file of files) {
       description: deck.description,
       isPremium: deck.isPremium,
       priceRub: deck.priceRub,
+      priceStars: deck.priceStars,
+      priceCoins: deck.priceCoins,
+      active: deck.active ?? true,
       sort: deck.sort,
     })
+    // Цены намеренно НЕ перетираем: их правят из админ-панели, и повторный
+    // сид не должен откатывать тариф к тому, что лежит в репозитории.
     .onConflictDoUpdate({
       target: decks.slug,
       set: {
         title: deck.title,
         description: deck.description,
         isPremium: deck.isPremium,
-        priceRub: deck.priceRub,
         sort: deck.sort,
       },
     })

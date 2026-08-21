@@ -4,6 +4,9 @@
   "description": "Действия почти неотличимы друг от друга. Обезьянке не выжить.",
   "isPremium": true,
   "priceRub": 100,
+  "priceStars": 100,
+  "priceCoins": 100,
+  "active": true,
   "sort": 20,
   "items": [
     "Почесать левую бровь",

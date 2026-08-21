@@ -1,4 +1,4 @@
-import { Composer } from 'grammy';
+import { Composer, InlineKeyboard } from 'grammy';
 import type { BotContext } from '../types.js';
 import * as R from '../repo/rooms.js';
 import { deckActions, decksFor, getDeck, ownsDeck } from '../repo/decks.js';
@@ -99,9 +99,11 @@ lobbyHandler.callbackQuery(/^lb:deck:(\d+)$/, async (ctx) => {
   }
   if (!(await ownsDeck(ctx.user.id, deck))) {
     trackDeckLockedHit(ctx.user.id, deck.slug);
-    await ctx.answerCallbackQuery({
-      text: `🔒 «${deck.title}» — платная колода, ${deck.priceRub} ₽.\nМагазин появится в ближайшем обновлении.`,
-      show_alert: true,
+    await ctx.answerCallbackQuery({ text: `🔒 «${deck.title}» — платная колода.`, show_alert: true });
+    // Ведём в магазин сразу на карточку этой колоды: человек уже выбрал,
+    // что хочет, — заставлять его искать это ещё раз незачем.
+    await ctx.reply(`🔒 Колода «${deck.title}» пока закрыта.`, {
+      reply_markup: new InlineKeyboard().text('🛒 Открыть в магазине', `shop:deck:${deck.id}`),
     });
     return;
   }

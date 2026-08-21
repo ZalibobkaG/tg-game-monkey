@@ -6,12 +6,11 @@ export interface FinishedPlayer {
   userId: number;
   seat: number;
   isMonkey: boolean;
-  points: number;
   leftEarly: boolean;
 }
 
 /**
- * Итоги партии: состав с ролями и очками + инкремент агрегатов игроков.
+ * Итоги партии: состав с ролями + инкремент агрегатов игроков.
  *
  * Агрегаты именно инкрементируем (`x = x + excluded.x`), а не пересчитываем:
  * пересчёт по всей истории на каждой партии со временем станет самым
@@ -40,7 +39,6 @@ export async function saveGameResult(args: {
       votesCast: mine.length,
       correctVotes: mine.filter((b) => monkeys.has(b.targetId)).length,
       timesAccused: ballots.filter((b) => b.targetId === p.userId).length,
-      pointsTotal: p.points,
       lastGameAt: now,
     };
   });
@@ -51,7 +49,7 @@ export async function saveGameResult(args: {
       .values(players.map((p) => ({ gameId, ...p })))
       .onConflictDoUpdate({
         target: [gamePlayers.gameId, gamePlayers.userId],
-        set: { points: sql`excluded.points`, leftEarly: sql`excluded.left_early` },
+        set: { leftEarly: sql`excluded.left_early` },
       });
 
     await tx
@@ -67,7 +65,6 @@ export async function saveGameResult(args: {
           votesCast: sql`${userStats.votesCast} + excluded.votes_cast`,
           correctVotes: sql`${userStats.correctVotes} + excluded.correct_votes`,
           timesAccused: sql`${userStats.timesAccused} + excluded.times_accused`,
-          pointsTotal: sql`${userStats.pointsTotal} + excluded.points_total`,
           lastGameAt: sql`excluded.last_game_at`,
         },
       });

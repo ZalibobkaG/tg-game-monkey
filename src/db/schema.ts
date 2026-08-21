@@ -13,7 +13,19 @@ export const gameState = pgEnum('game_state', [
 ]);
 
 export const paymentStatus = pgEnum('payment_status', [
-  'pending', 'paid', 'failed', 'refunded',
+  'pending', 'paid', 'canceled', 'failed', 'refunded',
+]);
+
+/** Что покупают: доступ к колоде или пополнение внутреннего счёта. */
+export const paymentKind = pgEnum('payment_kind', ['deck', 'topup']);
+
+/**
+ * Через что платят. `stars` — единственный способ, разрешённый Telegram для
+ * цифровых товаров внутри бота; остальные заведены под внешнюю витрину
+ * и физические товары и по умолчанию выключены (см. `settings`).
+ */
+export const paymentProvider = pgEnum('payment_provider', [
+  'stars', 'yookassa', 'cryptobot', 'wallet', 'manual',
 ]);
 
 export const users = pgTable('users', {
@@ -40,7 +52,14 @@ export const decks = pgTable('decks', {
   title: text().notNull(),
   description: text().notNull().default(''),
   isPremium: boolean().notNull().default(false),
+  /** цена в рублях — для внешних касс и витрины */
   priceRub: integer().notNull().default(0),
+  /** цена в Telegram Stars: отдельный тариф, а не пересчёт из рублей */
+  priceStars: integer().notNull().default(0),
+  /** цена во внутренней валюте (🍌) — ей платят с личного счёта */
+  priceCoins: integer().notNull().default(0),
+  /** снята с продажи: купившие играют, новые не покупают */
+  active: boolean().notNull().default(true),
   sort: integer().notNull().default(0),
 }, (t) => [uniqueIndex('decks_slug_uq').on(t.slug)]);
 
@@ -79,7 +98,7 @@ export const rooms = pgTable('rooms', {
   closedAt: timestamp({ withTimezone: true }),
 }, (t) => [
   // Частичный уникальный индекс: код занят только живой комнатой.
-  // Закрытые остаются в истории и не жгут коды — иначе «LITVIN» выгорел бы после первой игры.
+  // Закрытые остаются в истории и не жгут коды — иначе «MONKEY» выгорел бы после первой игры.
   uniqueIndex('rooms_code_active_uq').on(t.code).where(sql`state <> 'closed'`),
   index('rooms_code_idx').on(t.code),
 ]);
@@ -141,18 +160,137 @@ export const votes = pgTable('votes', {
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('votes_ballot_voter_uq').on(t.gameId, t.ballot, t.voterId)]);
 
+/**
+ * Заказ. Живёт от «нажал купить» до «выдали товар» и переживает перезапуск:
+ * ни звёздный `successful_payment`, ни вебхук кассы не гарантируют доставку
+ * ровно один раз, поэтому решение о выдаче принимается по строке в этой
+ * таблице, а не по факту прихода апдейта.
+ */
 export const payments = pgTable('payments', {
   id: serial().primaryKey(),
   userId: integer().notNull().references(() => users.id),
-  deckId: integer().notNull().references(() => decks.id),
-  provider: text().notNull(),
-  /** id платежа у провайдера — ключ идемпотентности */
+  kind: paymentKind().notNull().default('deck'),
+  /** null для пополнения счёта — там покупают не колоду, а 🍌 */
+  deckId: integer().references(() => decks.id),
+  provider: paymentProvider().notNull(),
+  /**
+   * Наш идентификатор заказа. Уходит провайдеру (invoice payload, metadata)
+   * и возвращается обратно — по нему находим заказ, не доверяя ничему из
+   * тела вебхука, кроме подписи и суммы.
+   */
+  orderId: text().notNull(),
+  /** id платежа у провайдера — второй ключ идемпотентности */
   externalId: text(),
+  /** сумма в минорных единицах: копейки для RUB, целые звёзды для XTR, 🍌 для COIN */
   amountMinor: integer().notNull(),
   currency: text().notNull().default('RUB'),
+  /** сколько 🍌 зачислить, если это пополнение счёта */
+  coinsAmount: integer().notNull().default(0),
   status: paymentStatus().notNull().default('pending'),
+  /** ссылка на оплату у провайдера — её же показываем, если человек вернулся к заказу */
+  payUrl: text(),
+  /** нужен для refundStarPayment: без него звёзды не вернуть */
+  telegramChargeId: text(),
+  /** сырой ответ провайдера и служебные пометки — для разбора спорных платежей */
+  metadata: jsonb().$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex('payments_provider_external_uq').on(t.provider, t.externalId)]);
+  paidAt: timestamp({ withTimezone: true }),
+  refundedAt: timestamp({ withTimezone: true }),
+}, (t) => [
+  uniqueIndex('payments_order_uq').on(t.orderId),
+  // NULL-ы в Postgres не равны друг другу, поэтому непроведённые заказы
+  // с пустым external_id этот индекс не стесняет.
+  uniqueIndex('payments_provider_external_uq').on(t.provider, t.externalId),
+  index('payments_user_idx').on(t.userId, t.createdAt),
+  index('payments_status_idx').on(t.status, t.createdAt),
+]);
+
+// ─── внутренний счёт ──────────────────────────────────────────────────────
+
+/**
+ * Личный счёт в 🍌. Отдельной таблицей, а не колонкой в `users`: строка
+ * пользователя лежит в LRU-кеше и переписывается на каждый апдейт — баланс
+ * там протухал бы, а инвалидация кеша на каждое начисление съела бы весь
+ * смысл кеша.
+ */
+export const wallets = pgTable('wallets', {
+  userId: integer().primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  balance: integer().notNull().default(0),
+  /** сколько всего пришло и ушло — для витрины «заработано с рефералов» */
+  totalEarned: integer().notNull().default(0),
+  totalSpent: integer().notNull().default(0),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
+
+export const ledgerReason = pgEnum('ledger_reason', [
+  'topup', 'purchase', 'refund', 'referral_bonus', 'signup_bonus', 'admin_adjust',
+]);
+
+/**
+ * Журнал движений по счёту. Баланс в `wallets` — материализованный итог,
+ * а правда лежит здесь: по журналу баланс можно пересчитать и сверить.
+ * `balanceAfter` пишем в той же транзакции — иначе спор «куда делись 🍌»
+ * разбирать нечем.
+ */
+export const walletLedger = pgTable('wallet_ledger', {
+  id: bigserial({ mode: 'number' }).primaryKey(),
+  userId: integer().notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** со знаком: списание отрицательное */
+  delta: integer().notNull(),
+  balanceAfter: integer().notNull(),
+  reason: ledgerReason().notNull(),
+  /** платёж, реферал или админ, вызвавший движение */
+  refId: integer(),
+  comment: text().notNull().default(''),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('wallet_ledger_user_idx').on(t.userId, t.createdAt)]);
+
+// ─── реферальная программа ────────────────────────────────────────────────
+
+/**
+ * Кто кого привёл. Одна строка на приглашённого: `inviteeId` — первичный
+ * ключ, поэтому переприсвоить себе чужого реферала нельзя, кто успел —
+ * тот и пригласил.
+ *
+ * Начисления живут отдельно (`wallet_ledger`): правила программы ещё не
+ * утверждены, а связь «кто кого привёл» уже нужна — её нельзя восстановить
+ * задним числом.
+ */
+export const referrals = pgTable('referrals', {
+  inviteeId: integer().primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  referrerId: integer().notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** как пришёл: deeplink | manual */
+  source: text().notNull().default('deeplink'),
+  /** приветственный бонус приглашённому уже выдан */
+  signupRewarded: boolean().notNull().default(false),
+  /** сколько 🍌 суммарно принёс этот реферал пригласившему */
+  earned: integer().notNull().default(0),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('referrals_referrer_idx').on(t.referrerId)]);
+
+/**
+ * Личный код-приглашение. Отдельно от id, чтобы ссылка не выдавала
+ * порядковый номер пользователя и не подбиралась перебором.
+ */
+export const referralCodes = pgTable('referral_codes', {
+  userId: integer().primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  code: text().notNull(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex('referral_codes_code_uq').on(t.code)]);
+
+// ─── настройки, редактируемые из панели ───────────────────────────────────
+
+/**
+ * Значения, которые меняются без выкатки: включённые способы оплаты,
+ * размеры реферальных бонусов, курс пополнения. В окружении держать нельзя —
+ * их правит владелец из панели, а не тот, у кого есть доступ к серверу.
+ */
+export const settings = pgTable('settings', {
+  key: text().primaryKey(),
+  value: jsonb().$type<unknown>().notNull(),
+  updatedBy: integer().references(() => users.id),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
 
 // ─── статистика ───────────────────────────────────────────────────────────
 
@@ -174,13 +312,12 @@ export const events = pgTable('events', {
   index('events_user_time_idx').on(t.userId, t.createdAt),
 ]);
 
-/** Кто и с какой ролью играл. Без этой таблицы история партий неполная: роли лежали в jsonb, а очки не сохранялись вовсе. */
+/** Кто и с какой ролью играл. Без этой таблицы история партий неполная: роли лежали в jsonb и терялись. */
 export const gamePlayers = pgTable('game_players', {
   gameId: integer().notNull().references(() => games.id, { onDelete: 'cascade' }),
   userId: integer().notNull().references(() => users.id, { onDelete: 'cascade' }),
   seat: integer().notNull(),
   isMonkey: boolean().notNull(),
-  points: integer().notNull().default(0),
   /** вышел или заблокировал бота посреди партии */
   leftEarly: boolean().notNull().default(false),
 }, (t) => [
@@ -198,7 +335,6 @@ export const userStats = pgTable('user_stats', {
   votesCast: integer().notNull().default(0),
   correctVotes: integer().notNull().default(0),
   timesAccused: integer().notNull().default(0),
-  pointsTotal: integer().notNull().default(0),
   roomsCreated: integer().notNull().default(0),
   lastGameAt: timestamp({ withTimezone: true }),
 });

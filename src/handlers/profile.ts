@@ -2,14 +2,30 @@ import { Composer, InlineKeyboard } from 'grammy';
 import type { BotContext } from '../types.js';
 import { playerStats } from '../repo/stats.js';
 import { displayName, forgetUser } from '../repo/users.js';
+import { statsOf } from '../repo/referrals.js';
+import { balanceOf } from '../repo/wallet.js';
 import { renderPlayerStats } from '../ui/admin.js';
 import { PRIVACY_TEXT } from '../ui/texts.js';
 
 export const profileHandler = new Composer<BotContext>();
 
 async function showStats(ctx: BotContext): Promise<void> {
-  const s = await playerStats(ctx.user.id);
-  await ctx.reply(renderPlayerStats({ name: displayName(ctx.user), ...s }), { parse_mode: 'HTML' });
+  const [s, referrals, balance] = await Promise.all([
+    playerStats(ctx.user.id),
+    statsOf(ctx.user.id),
+    balanceOf(ctx.user.id),
+  ]);
+
+  await ctx.reply(
+    renderPlayerStats({ name: displayName(ctx.user), ...s, referrals: referrals.invited, balance }),
+    {
+      parse_mode: 'HTML',
+      reply_markup: new InlineKeyboard()
+        .text('🎁 Пригласить друзей', 'shop:invite')
+        .row()
+        .text('🛒 Магазин', 'shop:home'),
+    },
+  );
 }
 
 profileHandler.command('stats', (ctx) => showStats(ctx));

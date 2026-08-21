@@ -6,7 +6,20 @@
  * живут в разных композерах: каждый смотрит, его ли это ввод, и либо забирает
  * его через `clear`, либо пропускает сообщение дальше.
  */
-export type PendingKind = 'room_code' | 'custom_code' | 'feedback' | 'feedback_reply' | 'admin_search';
+export type PendingKind =
+  | 'room_code'
+  | 'custom_code'
+  | 'feedback'
+  | 'feedback_reply'
+  | 'admin_search'
+  /** правка колоды из панели: payload — `add:12` или `set:12` */
+  | 'deck_items'
+  /** новая цена колоды: payload — `12:rub` | `12:stars` | `12:coins` */
+  | 'deck_price'
+  /** число в настройках экономики: payload — имя поля */
+  | 'econ_value'
+  /** правка баланса игрока: payload — id пользователя */
+  | 'wallet_adjust';
 
 export interface Pending {
   kind: PendingKind;

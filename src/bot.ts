@@ -11,6 +11,7 @@ import { gameHandler } from './handlers/game.js';
 import { adminHandler } from './handlers/admin.js';
 import { feedbackHandler } from './handlers/feedback.js';
 import { profileHandler } from './handlers/profile.js';
+import { shopHandler } from './handlers/shop.js';
 import { log } from './lib/log.js';
 import { captureError } from './lib/sentry.js';
 
@@ -65,6 +66,7 @@ bot.use(groupHandler);
 bot.use(adminHandler);
 bot.use(feedbackHandler);
 bot.use(gameHandler);
+bot.use(shopHandler);
 bot.use(lobbyHandler);
 bot.use(profileHandler);
 bot.use(startHandler);
@@ -93,6 +95,9 @@ export const COMMANDS = [
   { command: 'rules', description: 'правила' },
   { command: 'leave', description: 'выйти из комнаты' },
   { command: 'stats', description: 'моя статистика' },
+  { command: 'shop', description: 'магазин колод' },
+  { command: 'invite', description: 'пригласить друзей' },
+  { command: 'paysupport', description: 'вопросы по оплате' },
   { command: 'feedback', description: 'написать разработчикам' },
   { command: 'help', description: 'помощь' },
 ];

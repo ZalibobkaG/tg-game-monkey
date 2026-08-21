@@ -5,13 +5,13 @@ const ALPHABET = 'ABCDEFGHJKLMNPQRTUVWXYZ2346789';
 const GENERATE_LENGTH = 6;
 
 export const MIN_CODE_LEN = 4;
-export const MAX_CODE_LEN = 12;
+export const MAX_CODE_LEN = 20;
 
-/** Служебные слова — их нельзя занимать под код комнаты. */
+/** Служебные слова — их нельзя занимать под код комнаты. Название игры не в счёт: им и предлагаем называться. */
 const RESERVED_WORDS = new Set<string>([
   'START', 'STOP', 'HELP', 'RULES', 'ROOM', 'ROOMS', 'LEAVE', 'GAME', 'GAMES',
   'ADMIN', 'ADMINS', 'BOT', 'TEST', 'NULL', 'NONE', 'UNDEFINED', 'CANCEL',
-  'STATS', 'FEEDBACK', 'PRIVACY', 'MONKEY', 'OBEZYANKA',
+  'STATS', 'FEEDBACK', 'PRIVACY',
 ]);
 
 /** Обсценная лексика (транслит + английский). Отдельная константа, чтобы легко дополнять. */
@@ -89,7 +89,7 @@ export function validateCustomCode(
 export function codeErrorText(reason: CodeError): string {
   switch (reason) {
     case 'empty':
-      return 'Пустой код. Пришли его текстом — например <code>LITVIN</code>.';
+      return 'Пустой код. Пришли его текстом — например <code>MONKEY</code>.';
     case 'too_short':
       return `Слишком короткий код — нужно минимум ${MIN_CODE_LEN} символа.`;
     case 'too_long':
@@ -119,4 +119,19 @@ export function looksLikeJoinInput(text: string): boolean {
 
   const code = normalizeRoomCode(trimmed);
   return code.length >= MIN_CODE_LEN && code.length <= MAX_CODE_LEN;
+}
+
+/**
+ * Код пригласительной ссылки. Длиннее комнатного и из того же алфавита без
+ * похожих символов: его диктуют голосом реже, зато перебирать его не должно
+ * быть выгодно — на нём висят начисления.
+ */
+const REFERRAL_LENGTH = 8;
+
+export function generateReferralCode(): string {
+  let out = '';
+  for (let i = 0; i < REFERRAL_LENGTH; i++) {
+    out += ALPHABET[randomInt(ALPHABET.length)]!;
+  }
+  return out;
 }

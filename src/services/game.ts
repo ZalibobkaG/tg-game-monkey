@@ -4,7 +4,7 @@ import { db } from '../db/index.js';
 import { games, rounds, votes } from '../db/schema.js';
 import * as R from '../repo/rooms.js';
 import { displayName } from '../repo/users.js';
-import { deal, resolveBallot, scoreGame, sleep } from '../domain/game.js';
+import { deal, hasQuorum, resolveBallot, sleep } from '../domain/game.js';
 import { RULES, maxRounds } from '../domain/rules.js';
 import { withRoomLock } from '../lib/mutex.js';
 import { createDebouncer } from '../lib/debounce.js';
@@ -45,6 +45,8 @@ export interface LiveGame {
   ballot: number;
   /** голоса текущего бюллетеня: избиратель → кандидат */
   votes: Map<number, number>;
+  /** кто воздержался в текущем бюллетене: их не ждём, но и в подсчёт они не идут */
+  skipped: Set<number>;
   /** ограниченный список кандидатов при переголосовании */
   shortlist: number[] | null;
   /** метка последнего действия — по ней janitor добивает брошенные партии */
@@ -281,6 +283,7 @@ export function startGame(
       players,
       ballot: 0,
       votes: new Map(),
+      skipped: new Set(),
       shortlist: null,
       lastActivity: Date.now(),
       startedAt: Date.now(),
@@ -371,10 +374,22 @@ function candidatesFor(game: LiveGame, voter: Slot): UI.Candidate[] {
     .map((p) => ({ userId: p.userId, name: p.name }));
 }
 
+/**
+ * Можно ли воздержаться. В последнем раунде — нельзя: это единственный
+ * оставшийся шанс поймать обезьянку, и если все промолчат, она заберёт
+ * победу просто потому, что никто не нажал кнопку.
+ */
+export const canSkipVote = (game: LiveGame): boolean => game.currentRound < maxRounds;
+
+/** Ответил ли игрок в текущем бюллетене — голосом или пропуском. Только таких не ждём. */
+const hasAnswered = (game: LiveGame, userId: number): boolean =>
+  game.votes.has(userId) || game.skipped.has(userId);
+
 function paintBallot(api: Api, game: LiveGame, targets: readonly Slot[]): Promise<void> {
   const alive = activeSlots(game);
   const total = alive.length;
-  const voted = alive.filter((p) => game.votes.has(p.userId)).length;
+  const answered = alive.filter((p) => hasAnswered(game, p.userId)).length;
+  const canSkip = canSkipVote(game);
 
   return paint(api, game, targets, (p) => {
     const myTarget = game.votes.get(p.userId);
@@ -383,7 +398,9 @@ function paintBallot(api: Api, game: LiveGame, targets: readonly Slot[]): Promis
       revote: game.shortlist !== null,
       candidates: candidatesFor(game, p),
       myVoteName: myTarget === undefined ? undefined : nameOf(game, myTarget),
-      voted,
+      mySkipped: game.skipped.has(p.userId),
+      canSkip,
+      voted: answered,
       total,
     });
   });
@@ -397,7 +414,7 @@ function scheduleCounterPaint(api: Api, game: LiveGame): void {
       await paintBallot(
         api,
         g,
-        activeSlots(g).filter((p) => g.votes.has(p.userId)),
+        activeSlots(g).filter((p) => hasAnswered(g, p.userId)),
       );
     }),
   );
@@ -410,6 +427,7 @@ async function startVotingLocked(api: Api, game: LiveGame, shortlist: number[] |
   game.phase = 'voting';
   game.ballot += 1;
   game.votes.clear();
+  game.skipped.clear();
   game.shortlist = shortlist;
   game.lastActivity = Date.now();
 
@@ -452,13 +470,7 @@ async function castVoteLocked(api: Api, game: LiveGame, voterId: number, targetI
   await paintBallot(api, game, [voter]);
   if (!(await ensureViable(api, game))) return;
 
-  const alive = activeSlots(game);
-  if (alive.every((p) => game.votes.has(p.userId))) {
-    counterPaint.cancel(game.roomId);
-    await tallyLocked(api, game);
-    return;
-  }
-  scheduleCounterPaint(api, game);
+  await closeBallotIfDone(api, game);
 }
 
 export function castVote(api: Api, roomId: number, voterId: number, targetId: number): Promise<void> {
@@ -468,6 +480,44 @@ export function castVote(api: Api, roomId: number, voterId: number, targetId: nu
   });
 }
 
+async function skipVoteLocked(api: Api, game: LiveGame, voterId: number): Promise<void> {
+  if (game.phase !== 'voting') return;
+  if (!canSkipVote(game)) return;
+
+  const voter = slotOf(game, voterId);
+  if (!voter || voter.dropped) return;
+  // уже ответил — второй раз не переспрашиваем: кнопок у него всё равно нет
+  if (hasAnswered(game, voterId)) return;
+
+  game.skipped.add(voterId);
+  game.lastActivity = Date.now();
+
+  // В `votes` пропуск не пишем ни в памяти, ни в базе: воздержавшийся не даёт
+  // очков ни себе, ни обезьянке, и в раскладе голосов его быть не должно.
+  await paintBallot(api, game, [voter]);
+  if (!(await ensureViable(api, game))) return;
+
+  await closeBallotIfDone(api, game);
+}
+
+export function skipVote(api: Api, roomId: number, voterId: number): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    const game = live.get(roomId);
+    if (game) await skipVoteLocked(api, game, voterId);
+  });
+}
+
+/** Все ответили — считаем. Иначе обновляем счётчик тем, кто уже ответил. */
+async function closeBallotIfDone(api: Api, game: LiveGame): Promise<void> {
+  const alive = activeSlots(game);
+  if (alive.every((p) => hasAnswered(game, p.userId))) {
+    counterPaint.cancel(game.roomId);
+    await tallyLocked(api, game);
+    return;
+  }
+  scheduleCounterPaint(api, game);
+}
+
 async function tallyLocked(api: Api, game: LiveGame): Promise<void> {
   const counts = new Map<number, number>();
   for (const target of game.votes.values()) counts.set(target, (counts.get(target) ?? 0) + 1);
@@ -475,12 +525,40 @@ async function tallyLocked(api: Api, game: LiveGame): Promise<void> {
     .sort((a, b) => b[1] - a[1])
     .map(([userId, n]) => ({ name: nameOf(game, userId), votes: n }));
 
+  // Кворум проверяем до разбора голосов: если промолчало большинство,
+  // бюллетеня как бы и не было — ни раскладки, ни обвинённого, ни ролей.
+  const alive = activeSlots(game).length;
+  if (!hasQuorum(game.votes.size, alive)) {
+    track({
+      type: 'ballot_finished',
+      roomId: game.roomId,
+      gameId: game.gameId,
+      payload: {
+        ballot: game.ballot,
+        revote: game.shortlist !== null,
+        votes: game.votes.size,
+        skipped: game.skipped.size,
+        outcome: 'no_quorum',
+      },
+    });
+    game.shortlist = null;
+    game.phase = 'revealed';
+    await afterFailedVote(api, game, UI.renderNoQuorum(game.votes.size, alive));
+    return;
+  }
+
   const outcome = resolveBallot(game.votes, game.shortlist !== null);
   track({
     type: 'ballot_finished',
     roomId: game.roomId,
     gameId: game.gameId,
-    payload: { ballot: game.ballot, revote: game.shortlist !== null, votes: game.votes.size, outcome: outcome.kind },
+    payload: {
+      ballot: game.ballot,
+      revote: game.shortlist !== null,
+      votes: game.votes.size,
+      skipped: game.skipped.size,
+      outcome: outcome.kind,
+    },
   });
 
   if (outcome.kind === 'revote') {
@@ -527,23 +605,7 @@ async function afterFailedVote(api: Api, game: LiveGame, resultText: string): Pr
   }));
 }
 
-// ─── очки и финал ─────────────────────────────────────────────────────────
-
-interface Outcome {
-  /** таблица для экрана результатов */
-  scores: Array<{ name: string; points: number }>;
-  points: Map<number, number>;
-  ballots: Array<{ voterId: number; targetId: number }>;
-}
-
-async function computeScores(game: LiveGame, peasantsWon: boolean): Promise<Outcome> {
-  const ballots = await db.select().from(votes).where(eq(votes.gameId, game.gameId));
-  const points = scoreGame({ players: game.players, ballots, peasantsWon });
-  const scores = game.players
-    .map((p) => ({ name: p.name, points: points.get(p.userId) ?? 0 }))
-    .sort((a, b) => b.points - a.points);
-  return { scores, points, ballots };
-}
+// ─── финал ────────────────────────────────────────────────────────────────
 
 /** Партия кончилась — возвращаем комнату в лобби, если её тем временем не закрыли. */
 async function reopenLobby(roomId: number): Promise<void> {
@@ -558,11 +620,10 @@ async function finishLocked(api: Api, game: LiveGame, peasantsWon: boolean, pref
 
   await db.update(games).set({ state: 'finished', endedAt: new Date() }).where(eq(games.id, game.gameId));
 
-  const { scores, points, ballots } = await computeScores(game, peasantsWon);
+  const ballots = await db.select().from(votes).where(eq(votes.gameId, game.gameId));
   const final = UI.renderFinal({
     peasantsWon,
     monkeyNames: game.players.filter((p) => p.isMonkey).map((p) => p.name),
-    scores,
     rounds: game.currentRound,
     ballots: game.ballot,
   });
@@ -581,7 +642,6 @@ async function finishLocked(api: Api, game: LiveGame, peasantsWon: boolean, pref
       userId: p.userId,
       seat: p.seat,
       isMonkey: p.isMonkey,
-      points: points.get(p.userId) ?? 0,
       leftEarly: p.dropped,
     })),
     ballots: ballots.map((b) => ({ voterId: b.voterId, targetId: b.targetId })),
@@ -684,6 +744,7 @@ export async function recoverGames(): Promise<LiveGame[]> {
       })),
       ballot: g.ballot,
       votes: new Map(),
+      skipped: new Set(),
       shortlist: null,
       lastActivity: Date.now(),
       startedAt: g.startedAt.getTime(),

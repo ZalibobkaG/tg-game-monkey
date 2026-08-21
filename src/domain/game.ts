@@ -40,6 +40,15 @@ export type Ballot =
   /** есть единственный лидер */
   | { kind: 'accused'; userId: number };
 
+/**
+ * Состоялся ли бюллетень. Воздержаться можно, но если промолчало большинство,
+ * решение принимать не с чего: одного голоса хватило бы, чтобы указать
+ * на человека, и раскрытие роли по такому «решению» — чистая случайность.
+ */
+export function hasQuorum(votesCast: number, alivePlayers: number): boolean {
+  return votesCast * 2 >= alivePlayers;
+}
+
 /** Кто набрал большинство. `isRevote` меняет исход ничьей. */
 export function resolveBallot(votes: Map<number, number>, isRevote: boolean): Ballot {
   if (votes.size === 0) return { kind: 'tie' };
@@ -52,28 +61,4 @@ export function resolveBallot(votes: Map<number, number>, isRevote: boolean): Ba
 
   if (leaders.length === 1) return { kind: 'accused', userId: leaders[0]! };
   return isRevote ? { kind: 'tie' } : { kind: 'revote', leaders };
-}
-
-/** Очки по формуле правил. Считаем по всем бюллетеням партии. */
-export function scoreGame(args: {
-  players: Array<{ userId: number; isMonkey: boolean }>;
-  ballots: Array<{ voterId: number; targetId: number }>;
-  peasantsWon: boolean;
-}): Map<number, number> {
-  const { players, ballots, peasantsWon } = args;
-  const monkeys = players.filter((p) => p.isMonkey);
-  const isMonkey = new Set(monkeys.map((m) => m.userId));
-
-  const points = new Map<number, number>(players.map((p) => [p.userId, 0]));
-  const add = (userId: number, n: number) => {
-    if (points.has(userId)) points.set(userId, points.get(userId)! + n);
-  };
-
-  for (const v of ballots) {
-    if (isMonkey.has(v.targetId)) add(v.voterId, RULES.points.correctVote);
-    else for (const m of monkeys) add(m.userId, RULES.points.monkeyPerWrongVote);
-  }
-  if (!peasantsWon) for (const m of monkeys) add(m.userId, RULES.points.monkeySurvived);
-
-  return points;
 }

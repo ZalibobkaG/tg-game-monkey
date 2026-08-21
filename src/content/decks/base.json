@@ -4,6 +4,9 @@
   "description": "Застольные жесты. Бесплатно навсегда.",
   "isPremium": false,
   "priceRub": 0,
+  "priceStars": 0,
+  "priceCoins": 0,
+  "active": true,
   "sort": 0,
   "items": [
     "Посолить еду",

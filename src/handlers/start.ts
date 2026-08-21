@@ -14,6 +14,8 @@ import { roomQr } from '../services/qr.js';
 import * as pending from '../lib/pending.js';
 import { createRateLimiter } from '../lib/ratelimit.js';
 import { RULES_TEXT, WELCOME } from '../ui/texts.js';
+import { handleInvite } from '../services/referral.js';
+import { COIN, coins } from '../domain/economy.js';
 import { bumpRoomsCreated } from '../repo/gameStats.js';
 import { track, trackRoomCreated, trackRoomJoinFailed, trackRoomJoined, trackUserStart } from '../services/analytics.js';
 import { log } from '../lib/log.js';
@@ -34,6 +36,9 @@ export const menuKeyboard = () =>
     .row()
     .text('📖 Правила', 'menu:rules')
     .text('📊 Статистика', 'menu:stats')
+    .row()
+    .text('🛒 Магазин', 'menu:shop')
+    .text('🎁 Пригласить', 'menu:invite')
     .row()
     .text('💡 Написать разработчикам', 'fb:new');
 
@@ -139,6 +144,18 @@ startHandler.command('start', async (ctx) => {
   const payload = (ctx.match ?? '').trim();
   pending.clear(ctx.user.tgId);
 
+  // Приглашение проверяем первым: `ref_` и `r_` не пересекаются, но
+  // порядок здесь важнее сообразительности читателя.
+  if (payload.startsWith('ref_')) {
+    trackUserStart(ctx.user.id, 'deeplink_ref');
+    const outcome = await handleInvite(ctx.user.id, payload.slice(4).toUpperCase());
+    const greeting = outcome.bonus > 0
+      ? `${WELCOME}\n\n🎁 <b>Тебе начислено ${coins(outcome.bonus)} ${COIN}</b> за приход по приглашению.`
+      : WELCOME;
+    await ctx.reply(greeting, { parse_mode: 'HTML', reply_markup: menuKeyboard() });
+    return;
+  }
+
   if (payload.startsWith('r_')) {
     trackUserStart(ctx.user.id, 'deeplink_room');
     return joinByCode(ctx, payload.slice(2), 'deeplink');
@@ -176,6 +193,10 @@ startHandler.command('help', (ctx) =>
       '/room — вернуться в свою комнату',
       '/leave — выйти из комнаты',
       '/stats — моя статистика',
+      '/shop — магазин колод',
+      '/balance — мой счёт',
+      '/invite — пригласить друзей',
+      '/paysupport — вопросы по оплате',
       '/feedback — написать разработчикам',
       '/privacy — что бот хранит',
       '/cancel — отменить ввод',
@@ -216,7 +237,15 @@ startHandler.callbackQuery('menu:create', async (ctx) => {
 startHandler.callbackQuery('menu:join', async (ctx) => {
   await ctx.answerCallbackQuery();
   pending.expect(ctx.user.tgId, 'room_code');
-  await ctx.reply(`🔑 Пришли код комнаты — например <code>LITVIN</code>.`, { parse_mode: 'HTML' });
+  await ctx.reply(
+    [
+      '🔑 <b>Вход в комнату</b>',
+      '',
+      'Пришли код, который дал ведущий — слово или набор символов,',
+      `например <code>MONKEY</code>.`,
+    ].join('\n'),
+    { parse_mode: 'HTML' },
+  );
 });
 
 startHandler.callbackQuery('menu:rules', async (ctx) => {
@@ -251,7 +280,7 @@ startHandler.on('message:text', async (ctx, next) => {
       pending.expect(ctx.user.tgId, 'room_code');
       await ctx.reply(
         `Это не похоже на код. Нужно ${MIN_CODE_LEN}–${MAX_CODE_LEN} латинских букв и цифр, ` +
-          'например <code>LITVIN</code>.\n/cancel — отменить.',
+          'например <code>MONKEY</code>.\n/cancel — отменить.',
         { parse_mode: 'HTML' },
       );
       return;

@@ -27,7 +27,12 @@ export type EventType =
   | 'feedback_reply_started'
   | 'feedback_replied'
   | 'admin_action'
-  | 'bot_blocked';
+  | 'bot_blocked'
+  | 'purchase_started'
+  | 'purchase_paid'
+  | 'shop_opened'
+  | 'referral_attached'
+  | 'referral_bonus';
 
 export interface TrackedEvent {
   type: EventType;
@@ -153,3 +158,9 @@ export const trackAdminAction = (
 
 export const trackBotBlocked = (userId: number, where: string) =>
   track({ type: 'bot_blocked', userId, payload: { where } });
+
+export const trackShopOpened = (userId: number, from: string) =>
+  track({ type: 'shop_opened', userId, payload: { from } });
+
+export const trackReferralAttached = (inviteeId: number, referrerId: number) =>
+  track({ type: 'referral_attached', userId: inviteeId, payload: { referrerId } });

@@ -138,7 +138,6 @@ export interface PlayerStats {
   winsAsPeasant: number;
   votesCast: number;
   correctVotes: number;
-  pointsTotal: number;
   lastGameAt: Date | null;
 }
 
@@ -152,7 +151,6 @@ export async function playerStats(userId: number): Promise<PlayerStats> {
       winsAsPeasant: 0,
       votesCast: 0,
       correctVotes: 0,
-      pointsTotal: 0,
       lastGameAt: null,
     };
   }
@@ -163,7 +161,6 @@ export async function playerStats(userId: number): Promise<PlayerStats> {
     winsAsPeasant: row.winsAsPeasant,
     votesCast: row.votesCast,
     correctVotes: row.correctVotes,
-    pointsTotal: row.pointsTotal,
     lastGameAt: row.lastGameAt,
   };
 }
@@ -280,21 +277,23 @@ export async function findUsers(query: string, limit = 10): Promise<Array<typeof
     .limit(limit);
 }
 
+/** Лидеры по числу побед — в любой роли. При равенстве выше тот, кто сыграл больше партий. */
 export async function topPlayers(
   limit = 10,
-): Promise<Array<{ userId: number; name: string; gamesPlayed: number; pointsTotal: number }>> {
+): Promise<Array<{ userId: number; name: string; gamesPlayed: number; wins: number }>> {
+  const wins = sql<number>`${userStats.winsAsMonkey} + ${userStats.winsAsPeasant}`;
   const rows = await db
-    .select({ user: users, gamesPlayed: userStats.gamesPlayed, pointsTotal: userStats.pointsTotal })
+    .select({ user: users, gamesPlayed: userStats.gamesPlayed, wins })
     .from(userStats)
     .innerJoin(users, eq(users.id, userStats.userId))
-    .orderBy(desc(userStats.pointsTotal))
+    .orderBy(desc(wins), desc(userStats.gamesPlayed))
     .limit(limit);
 
   return rows.map((r) => ({
     userId: r.user.id,
     name: displayName(r.user),
     gamesPlayed: r.gamesPlayed,
-    pointsTotal: r.pointsTotal,
+    wins: Number(r.wins),
   }));
 }
 

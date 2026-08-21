@@ -1,6 +1,6 @@
 /** Правила игры — единственный источник истины по числам. */
 export const RULES = {
-  minPlayers: 4,
+  minPlayers: 3,
   maxPlayers: 15,
   /** начиная с этого числа игроков — две обезьянки */
   twoMonkeysFrom: 12,
@@ -10,14 +10,6 @@ export const RULES = {
   voteEveryOptions: [1, 2, 3] as const,
   defaultVoteEvery: 1,
   countdownSeconds: 3,
-  points: {
-    /** каждой обезьянке, если её так и не нашли */
-    monkeySurvived: 3,
-    /** тому, кто верно указал обезьянку */
-    correctVote: 1,
-    /** обезьянке за каждый голос, ушедший мимо */
-    monkeyPerWrongVote: 1,
-  },
 } as const;
 
 export const maxRounds = RULES.cardSize;

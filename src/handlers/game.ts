@@ -1,7 +1,7 @@
 import { Composer } from 'grammy';
 import type { BotContext } from '../types.js';
 import * as R from '../repo/rooms.js';
-import { abortGame, castVote, getLive, runRound, slotOf, startVoting } from '../services/game.js';
+import { abortGame, canSkipVote, castVote, getLive, runRound, skipVote, slotOf, startVoting } from '../services/game.js';
 import type { LiveGame, Slot } from '../services/game.js';
 import { openLobbyFor } from '../services/lobby.js';
 
@@ -69,6 +69,22 @@ gameHandler.callbackQuery(/^v:(\d+)$/, async (ctx) => {
   }
   await ctx.answerCallbackQuery({ text: 'Голос принят.' });
   await castVote(ctx.api, game.roomId, ctx.user.id, targetId);
+});
+
+gameHandler.callbackQuery('v:skip', async (ctx) => {
+  const found = await liveFor(ctx);
+  if (!found) return;
+  const { game } = found;
+  if (game.phase !== 'voting') {
+    await ctx.answerCallbackQuery({ text: 'Голосование уже закончилось.' });
+    return;
+  }
+  if (!canSkipVote(game)) {
+    await ctx.answerCallbackQuery({ text: 'Последний раунд — пропустить нельзя.', show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: 'Пропустил.' });
+  await skipVote(ctx.api, game.roomId, ctx.user.id);
 });
 
 gameHandler.callbackQuery('g:end', async (ctx) => {

@@ -16,8 +16,13 @@ export async function getDeckBySlug(slug: string): Promise<Deck | undefined> {
   return db.query.decks.findFirst({ where: eq(decks.slug, slug) });
 }
 
+/** Порядок фиксирован по id: раздаче он безразличен (она тасует), а в панели нумерация не должна прыгать. */
 export async function deckActions(deckId: number): Promise<string[]> {
-  const rows = await db.select({ text: deckItems.text }).from(deckItems).where(eq(deckItems.deckId, deckId));
+  const rows = await db
+    .select({ text: deckItems.text })
+    .from(deckItems)
+    .where(eq(deckItems.deckId, deckId))
+    .orderBy(asc(deckItems.id));
   return rows.map((r) => r.text);
 }
 
@@ -59,4 +64,59 @@ export async function revokeDeck(userId: number, deckId: number): Promise<void> 
 
 export async function grantDeck(userId: number, deckId: number, paymentId?: number): Promise<void> {
   await db.insert(userDecks).values({ userId, deckId, paymentId: paymentId ?? null }).onConflictDoNothing();
+}
+
+// ─── редактирование содержимого (админ-панель) ────────────────────────────
+
+/**
+ * Дописать действия в конец колоды. Живым партиям это не мешает: они играют
+ * по снапшоту `games.actions`, снятому на старте.
+ */
+export async function addDeckItems(deckId: number, texts: string[]): Promise<void> {
+  if (!texts.length) return;
+  await db.insert(deckItems).values(texts.map((text) => ({ deckId, text })));
+}
+
+/** Заменить содержимое целиком. Транзакция — чтобы колода не осталась пустой. */
+export async function replaceDeckItems(deckId: number, texts: string[]): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.delete(deckItems).where(eq(deckItems.deckId, deckId));
+    if (texts.length) await tx.insert(deckItems).values(texts.map((text) => ({ deckId, text })));
+  });
+}
+
+export async function countDeckItems(deckId: number): Promise<number> {
+  const [row] = await db.select({ n: count() }).from(deckItems).where(eq(deckItems.deckId, deckId));
+  return Number(row?.n ?? 0);
+}
+
+// ─── тарифы (админ-панель) ────────────────────────────────────────────────
+
+export type PriceField = 'rub' | 'stars' | 'coins';
+
+const PRICE_COLUMNS = {
+  rub: 'priceRub',
+  stars: 'priceStars',
+  coins: 'priceCoins',
+} as const;
+
+/**
+ * Изменить одну цену. Идущих партий это не касается — они играют по
+ * снапшоту действий, а доступ уже выдан навсегда; дорожает только
+ * покупка для тех, кто ещё не купил.
+ */
+export async function setDeckPrice(deckId: number, field: PriceField, value: number): Promise<void> {
+  await db
+    .update(decks)
+    .set({ [PRICE_COLUMNS[field]]: Math.max(0, Math.round(value)) })
+    .where(eq(decks.id, deckId));
+}
+
+export async function setDeckPremium(deckId: number, isPremium: boolean): Promise<void> {
+  await db.update(decks).set({ isPremium }).where(eq(decks.id, deckId));
+}
+
+/** Снять с продажи. Купившие сохраняют доступ — права живут в user_decks. */
+export async function setDeckActive(deckId: number, active: boolean): Promise<void> {
+  await db.update(decks).set({ active }).where(eq(decks.id, deckId));
 }

@@ -4,6 +4,9 @@
   "description": "Безопасные жесты без прикосновений. Знакомимся через игру.",
   "isPremium": true,
   "priceRub": 100,
+  "priceStars": 100,
+  "priceCoins": 100,
+  "active": true,
   "sort": 10,
   "items": [
     "Улыбнуться и кивнуть соседу справа",
