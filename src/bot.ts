@@ -91,6 +91,7 @@ bot.catch(async (err) => {
 
 export const COMMANDS = [
   { command: 'start', description: 'меню' },
+  { command: 'app', description: 'открыть приложение' },
   { command: 'room', description: 'вернуться в комнату' },
   { command: 'rules', description: 'правила' },
   { command: 'leave', description: 'выйти из комнаты' },

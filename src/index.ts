@@ -7,6 +7,9 @@ import { announceRecovery, recoverGames } from './services/game.js';
 import { startJanitor } from './services/janitor.js';
 import { flush as flushAnalytics } from './services/analytics.js';
 import { handlePaymentWebhook, paymentWebhooksEnabled, webhookPaths } from './http/webhooks.js';
+import { handleApi, webAppEnabled } from './webapp/api.js';
+import { handleStatic } from './webapp/static.js';
+import { setupMiniApp } from './webapp/setup.js';
 import { log } from './lib/log.js';
 import { initSentry, flushSentry } from './lib/sentry.js';
 
@@ -27,7 +30,7 @@ async function main(): Promise<void> {
   // Сервер поднимаем и в polling-режиме, если подключены внешние кассы:
   // их уведомлениям некуда прийти, кроме HTTP, независимо от того, как
   // мы забираем апдейты Telegram.
-  const needsHttp = config.mode === 'webhook' || paymentWebhooksEnabled();
+  const needsHttp = config.mode === 'webhook' || paymentWebhooksEnabled() || webAppEnabled();
   const tg =
     config.mode === 'webhook'
       ? webhookCallback(bot, 'http', { secretToken: config.webhookSecret || undefined })
@@ -38,10 +41,17 @@ async function main(): Promise<void> {
         void (async () => {
           // Платёжные уведомления идут первыми: у них свои пути с секретом.
           if (await handlePaymentWebhook(bot.api, req, res)) return;
+          if (await handleApi(bot.api, req, res)) return;
+          if (await handleStatic(req, res)) return;
           if (tg && req.method === 'POST' && req.url === '/tg') return void tg(req, res);
           const health = req.url === '/health';
           res.writeHead(health ? 200 : 404).end(health ? 'ok' : '');
-        })();
+        })().catch((e) => {
+          // Необработанный отказ промиса в Node роняет процесс целиком —
+          // а вместе с ним и партии, которые сейчас идут.
+          log.error({ err: e, url: req.url }, 'HTTP-обработчик упал');
+          if (!res.headersSent) res.writeHead(500).end();
+        });
       })
     : null;
 
@@ -50,6 +60,10 @@ async function main(): Promise<void> {
     if (paymentWebhooksEnabled()) {
       const paths = webhookPaths();
       log.info({ ...paths }, '💳 приём уведомлений от касс включён');
+    }
+    if (webAppEnabled()) {
+      log.info({ url: config.webapp.url }, '🪟 мини-апп поднят');
+      void setupMiniApp(bot.api);
     }
   }
 

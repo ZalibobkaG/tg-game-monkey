@@ -49,10 +49,44 @@ export interface LiveGame {
   skipped: Set<number>;
   /** ограниченный список кандидатов при переголосовании */
   shortlist: number[] | null;
+  /**
+   * В этом раунде уже голосовали. Бот держит это знание в кнопке, которую
+   * нарисовал: после несостоявшегося голосования он предлагает не второй
+   * бюллетень, а следующий раунд. Мини-апп кнопок не наследует и должен
+   * узнать то же самое из состояния — иначе из него можно было бы
+   * переголосовать по кругу.
+   */
+  ballotDone: boolean;
   /** метка последнего действия — по ней janitor добивает брошенные партии */
   lastActivity: number;
   startedAt: number;
+  /**
+   * Когда отсчёт закончится, в epoch-миллисекундах. Нужен не боту, а мини-аппу:
+   * он опрашивает состояние раз в секунду и по этой метке рисует 3-2-1 сам,
+   * не дожидаясь ответа сервера на каждую цифру.
+   */
+  revealAt: number | null;
 }
+
+/**
+ * Итог последней партии в комнате. Живая партия после финала стирается из
+ * `live`, а мини-апп опрашивает состояние — без этой памяти он показал бы
+ * пустое лобби ровно в тот момент, когда человеку интересен результат.
+ */
+export interface LastResult {
+  gameId: number;
+  /** null — партия отменена, а не сыграна */
+  peasantsWon: boolean | null;
+  monkeyNames: string[];
+  rounds: number;
+  ballots: number;
+  reason: string;
+  at: number;
+}
+
+const results = new Map<number, LastResult>();
+
+export const lastResult = (roomId: number): LastResult | undefined => results.get(roomId);
 
 const live = new Map<number, LiveGame>();
 
@@ -285,10 +319,13 @@ export function startGame(
       votes: new Map(),
       skipped: new Set(),
       shortlist: null,
+      ballotDone: false,
       lastActivity: Date.now(),
       startedAt: Date.now(),
+      revealAt: null,
     };
     live.set(room.id, game);
+    results.delete(room.id);
     trackGameStarted(room.id, game.gameId, players.length, deckSlug, room.voteEvery);
 
     // кто-то отвалился прямо на раздаче — проверяем состав до первого раунда
@@ -322,6 +359,8 @@ async function runRoundLocked(api: Api, game: LiveGame): Promise<void> {
 
   game.phase = 'countdown';
   game.lastActivity = Date.now();
+  game.revealAt = Date.now() + RULES.countdownSeconds * 1000;
+  game.ballotDone = false;
   const round = (game.currentRound += 1);
   const actionIndex = game.actionOrder[round - 1]!;
 
@@ -347,6 +386,7 @@ async function runRoundLocked(api: Api, game: LiveGame): Promise<void> {
   // сколько заняла доставка сигнала всей комнате — растёт, когда упираемся в лимиты Telegram
   trackRoundPlayed(game.gameId, round, actionIndex, Date.now() - t0);
   game.phase = 'revealed';
+  game.revealAt = null;
   game.lastActivity = Date.now();
 }
 
@@ -426,6 +466,7 @@ async function startVotingLocked(api: Api, game: LiveGame, shortlist: number[] |
 
   game.phase = 'voting';
   game.ballot += 1;
+  game.ballotDone = true;
   game.votes.clear();
   game.skipped.clear();
   game.shortlist = shortlist;
@@ -657,6 +698,16 @@ async function finishLocked(api: Api, game: LiveGame, peasantsWon: boolean, pref
     Math.round((Date.now() - game.startedAt) / 1000),
   );
 
+  results.set(game.roomId, {
+    gameId: game.gameId,
+    peasantsWon,
+    monkeyNames: game.players.filter((p) => p.isMonkey).map((p) => p.name),
+    rounds: game.currentRound,
+    ballots: game.ballot,
+    reason: '',
+    at: Date.now(),
+  });
+
   await R.clearGameMessages(game.roomId);
   await reopenLobby(game.roomId);
   live.delete(game.roomId);
@@ -683,6 +734,16 @@ async function abortLocked(api: Api, game: LiveGame, reason: string): Promise<vo
   });
   await paintAll(api, game, () => ({ text: UI.renderAborted(reason) }));
   await Promise.all(game.players.map((p) => api.deleteMessage(p.tgId, p.cardMessageId).catch(() => {})));
+
+  results.set(game.roomId, {
+    gameId: game.gameId,
+    peasantsWon: null,
+    monkeyNames: [],
+    rounds: game.currentRound,
+    ballots: game.ballot,
+    reason,
+    at: Date.now(),
+  });
 
   await R.clearGameMessages(game.roomId);
   await reopenLobby(game.roomId);
@@ -746,8 +807,10 @@ export async function recoverGames(): Promise<LiveGame[]> {
       votes: new Map(),
       skipped: new Set(),
       shortlist: null,
+      ballotDone: false,
       lastActivity: Date.now(),
       startedAt: g.startedAt.getTime(),
+      revealAt: null,
     };
     live.set(g.roomId, game);
     restored.push(game);

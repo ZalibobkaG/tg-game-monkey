@@ -18,6 +18,7 @@ import { handleInvite } from '../services/referral.js';
 import { COIN, coins } from '../domain/economy.js';
 import { bumpRoomsCreated } from '../repo/gameStats.js';
 import { track, trackRoomCreated, trackRoomJoinFailed, trackRoomJoined, trackUserStart } from '../services/analytics.js';
+import { config, miniAppLink } from '../config.js';
 import { log } from '../lib/log.js';
 
 export const startHandler = new Composer<BotContext>();
@@ -28,8 +29,17 @@ export const startHandler = new Composer<BotContext>();
  */
 const joinLimiter = createRateLimiter(10, 60_000);
 
-export const menuKeyboard = () =>
-  new InlineKeyboard()
+/**
+ * Главное меню. Кнопка мини-аппа первой — но только если он поднят:
+ * `web_app` с пустым или http-адресом Telegram отвергает целиком,
+ * вместе со всей клавиатурой.
+ */
+export const menuKeyboard = () => {
+  const kb = new InlineKeyboard();
+  if (config.webapp.url.startsWith('https://')) {
+    kb.webApp('🚀 Открыть приложение', config.webapp.url).row();
+  }
+  return kb
     .text('🎲 Создать комнату', 'menu:create')
     .row()
     .text('🔑 Войти по коду', 'menu:join')
@@ -41,6 +51,7 @@ export const menuKeyboard = () =>
     .text('🎁 Пригласить', 'menu:invite')
     .row()
     .text('💡 Написать разработчикам', 'fb:new');
+};
 
 async function sendQr(ctx: BotContext, code: string): Promise<void> {
   const png = await roomQr(code);
@@ -176,6 +187,26 @@ startHandler.command('start', async (ctx) => {
 
   trackUserStart(ctx.user.id, 'direct');
   await ctx.reply(WELCOME, { parse_mode: 'HTML', reply_markup: menuKeyboard() });
+});
+
+startHandler.command('app', async (ctx) => {
+  if (!config.webapp.url.startsWith('https://')) {
+    await ctx.reply('Приложение сейчас не поднято — играем прямо в чате. /start');
+    return;
+  }
+  const direct = miniAppLink();
+  const kb = new InlineKeyboard().webApp('🚀 Открыть приложение', config.webapp.url);
+  await ctx.reply(
+    [
+      '🚀 <b>Обезьянка</b> — приложение',
+      '',
+      'Комната, карточка, сигнал и голосование — на одном экране.',
+      'Карточка и сигнал по-прежнему дублируются в чат: если приложение',
+      'закроется посреди партии, ты ничего не пропустишь.',
+      ...(direct ? ['', `Прямая ссылка: ${direct}`] : []),
+    ].join('\n'),
+    { parse_mode: 'HTML', reply_markup: kb },
+  );
 });
 
 startHandler.command('rules', (ctx) => ctx.reply(RULES_TEXT, { parse_mode: 'HTML' }));

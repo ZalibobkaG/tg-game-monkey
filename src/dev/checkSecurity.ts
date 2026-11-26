@@ -191,6 +191,19 @@ async function main(): Promise<void> {
     process.stderr.write(child.stderr ?? '');
   }
 
+  // Вход в мини-апп: там своя подпись и свой набор атак, поэтому проверка
+  // живёт отдельным файлом — но прогоняется вместе со всеми.
+  const web = spawnSync(
+    process.execPath,
+    [...process.execArgv, fileURLToPath(new URL('./checkWebapp.ts', import.meta.url))],
+    { encoding: 'utf8', env: { ...process.env } },
+  );
+  process.stdout.write(web.stdout ?? '');
+  if (web.status !== 0) {
+    failed++;
+    process.stderr.write(web.stderr ?? '');
+  }
+
   // ── 4. Обход оплаты ────────────────────────────────────────────────────
   const deck = await getDeckBySlug('hardcore');
   const backup = { rub: deck!.priceRub, stars: deck!.priceStars, coins: deck!.priceCoins };

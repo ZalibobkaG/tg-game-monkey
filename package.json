@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:webapp": "tsx watch src/dev/webappServer.ts",
     "build": "tsc -p tsconfig.json && npm run copy:assets",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -16,8 +17,10 @@
     "db:seed": "tsx src/db/seed.ts",
     "check:money": "tsx src/dev/checkMoney.ts",
     "check:security": "tsx --import tsx src/dev/checkSecurity.ts",
+    "check:webapp": "tsx src/dev/checkWebapp.ts",
+    "check:miniapp": "tsx src/dev/checkMiniApp.ts",
     "db:studio": "drizzle-kit studio",
-    "copy:assets": "rm -rf dist/content dist/db/migrations && cp -R src/content dist/content && cp -R src/db/migrations dist/db/migrations"
+    "copy:assets": "rm -rf dist/content dist/db/migrations dist/public && cp -R src/content dist/content && cp -R src/db/migrations dist/db/migrations && cp -R src/public dist/public"
   },
   "dependencies": {
     "@grammyjs/auto-retry": "^2.0.2",

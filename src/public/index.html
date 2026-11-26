@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+    <title>Обезьянка</title>
+    <!--
+      Единственный внешний скрипт. Он кладёт в страницу window.Telegram.WebApp —
+      мост в клиент Telegram: тема, кнопки, вибрация, счета, initData.
+      Подключать его копией со своего домена нельзя: Telegram обновляет мост
+      вместе с приложением.
+    -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/app/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <div class="boot">
+        <div class="boot__monkey">🐒</div>
+        <div class="boot__text">Загружаю…</div>
+      </div>
+    </div>
+    <nav id="tabs" class="tabs" hidden>
+      <button class="tab" data-tab="game"><span>🎬</span>Игра</button>
+      <button class="tab" data-tab="shop"><span>🛒</span>Магазин</button>
+      <button class="tab" data-tab="me"><span>📊</span>Профиль</button>
+    </nav>
+    <script src="/app/app.js"></script>
+  </body>
+</html>

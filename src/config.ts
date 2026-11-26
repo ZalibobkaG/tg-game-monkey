@@ -28,6 +28,39 @@ export const config = {
   sentryDsn: process.env.SENTRY_DSN ?? '',
 
   /**
+   * Мини-апп. Пусто — не поднимается вовсе: ни статики, ни API, ни кнопок.
+   * Telegram открывает только https, поэтому локально нужен туннель
+   * (cloudflared / ngrok), а не http://localhost.
+   */
+  webapp: {
+    /** публичный адрес, на котором лежит страница мини-аппа */
+    url: (process.env.WEBAPP_URL ?? '').trim().replace(/\/$/, ''),
+    /**
+     * Сколько живёт подпись `initData`. Telegram подписывает её один раз при
+     * открытии и не обновляет, поэтому это срок сессии, а не окно от replay:
+     * поставить сюда пять минут — значит выкидывать всех, кто не закрыл
+     * приложение.
+     */
+    initDataTtlSec: Number(process.env.WEBAPP_INITDATA_TTL) > 0 ? Number(process.env.WEBAPP_INITDATA_TTL) : 86400,
+    /** ставить ли кнопку «Играть» в меню чата с ботом при старте */
+    menuButton: (process.env.WEBAPP_MENU_BUTTON ?? 'true') === 'true',
+    /**
+     * Короткое имя приложения из @BotFather (`/newapp`). Нужно только для
+     * прямой ссылки `t.me/bot/app`: кнопки в чате работают и без него.
+     */
+    shortName: (process.env.WEBAPP_SHORT_NAME ?? '').trim(),
+    /**
+     * Разработка в обычном браузере. Если здесь стоит tg_id, запросы без
+     * подписи Telegram считаются запросами от этого человека — иначе мини-апп
+     * невозможно открыть иначе как с телефона через туннель.
+     *
+     * В проде отключается жёстко, а не «по договорённости»: с этой лазейкой
+     * подпись перестаёт что-либо значить.
+     */
+    devTgId: process.env.NODE_ENV === 'production' ? null : Number(process.env.WEBAPP_DEV_TG_ID ?? 0) || null,
+  },
+
+  /**
    * Ключи касс. Пусто — провайдер просто не поднимается: включить его из
    * панели не выйдет, и это намеренно. Деньги не должны зависеть от того,
    * не промахнулся ли кто-то кнопкой в интерфейсе.
@@ -64,4 +97,15 @@ export function deepLink(code: string): string {
 /** Пригласительная ссылка. Префикс `ref_` не пересекается с `r_`/`g_`. */
 export function referralLink(code: string): string {
   return `https://t.me/${config.botUsername}?start=ref_${code}`;
+}
+
+/**
+ * Прямая ссылка на мини-апп: `t.me/<бот>/<приложение>`. Работает только если
+ * приложение заведено в @BotFather (`/newapp`) — иначе пусто, и звать её
+ * незачем. `startapp` доезжает внутрь как `start_param` в initData.
+ */
+export function miniAppLink(startParam?: string): string | null {
+  if (!config.webapp.shortName) return null;
+  const base = `https://t.me/${config.botUsername}/${config.webapp.shortName}`;
+  return startParam ? `${base}?startapp=${encodeURIComponent(startParam)}` : base;
 }
